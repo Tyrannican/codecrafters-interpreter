@@ -23,11 +23,11 @@ fn main() {
             });
 
             // TODO: Uncomment the code below to pass the first stage
-            // if !file_contents.is_empty() {
-            //     panic!("Scanner not implemented");
-            // } else {
-            //     println!("EOF  null"); // Placeholder, replace this line when implementing the scanner
-            // }
+            if !file_contents.is_empty() {
+                panic!("Scanner not implemented");
+            } else {
+                println!("EOF  null"); // Placeholder, replace this line when implementing the scanner
+            }
         }
         _ => {
             eprintln!("Unknown command: {}", command);
