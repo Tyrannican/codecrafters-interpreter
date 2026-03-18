@@ -328,7 +328,7 @@ impl<'de> Iterator for Lexer<'de> {
                     let err = TokenError {
                         src: self.input.to_string(),
                         token: c,
-                        offset: self.byte - (self.byte - c.len_utf8()),
+                        offset: self.byte,
                     };
 
                     return Some(Err(LexError::InvalidToken(err)));
