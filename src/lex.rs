@@ -309,7 +309,7 @@ impl<'de> Iterator for Lexer<'de> {
                         let ty = match c {
                             '<' => TokenType::Less,
                             '>' => TokenType::Greater,
-                            '!' => TokenType::BangEqual,
+                            '!' => TokenType::Bang,
                             '=' => TokenType::Equal,
                             _ => unreachable!("caught by above match"),
                         };
