@@ -207,6 +207,8 @@ impl<'de> Iterator for Lexer<'de> {
                             token: '"',
                         };
 
+                        self.byte += self.rest.len();
+                        self.rest = &self.rest[self.rest.len()..];
                         return Some(Err(LexError::UnterminatedString(err)));
                     }
                 }
