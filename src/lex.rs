@@ -291,26 +291,34 @@ impl<'de> Iterator for Lexer<'de> {
                     let trimmed = remainder.len() - self.rest.len() - 1;
                     self.byte += trimmed;
 
-                    let subtype = if self.rest.starts_with('=') {
-                        match c {
+                    let (subtype, src) = if self.rest.starts_with('=') {
+                        let ty = match c {
                             '<' => TokenType::LessEqual,
                             '>' => TokenType::GreaterEqual,
                             '!' => TokenType::BangEqual,
                             '=' => TokenType::EqualEqual,
                             _ => unreachable!("caught by above match"),
-                        }
+                        };
+
+                        let src = &remainder[..c.len_utf8() + trimmed + 1];
+                        self.rest = &self.rest[1..];
+                        self.byte += 1;
+
+                        (ty, src)
                     } else {
-                        match c {
+                        let ty = match c {
                             '<' => TokenType::Less,
                             '>' => TokenType::Greater,
                             '!' => TokenType::BangEqual,
                             '=' => TokenType::Equal,
                             _ => unreachable!("caught by above match"),
-                        }
+                        };
+
+                        (ty, selected)
                     };
 
                     return Some(Ok(Token {
-                        source: selected,
+                        source: src,
                         offset: index,
                         subtype,
                     }));
