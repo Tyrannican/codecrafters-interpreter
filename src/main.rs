@@ -1,36 +1,54 @@
 #![allow(unused_variables)]
-use std::env;
-use std::fs;
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use codecrafters_interpreter::lex::{LexError, Lexer};
+use std::path::PathBuf;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!("Usage: {} tokenize <filename>", args[0]);
-        return;
-    }
+#[derive(Parser, Debug)]
+struct Args {
+    #[clap(subcommand)]
+    command: LoxCommand,
+}
 
-    let command = &args[1];
-    let filename = &args[2];
+#[derive(Subcommand, Debug)]
+enum LoxCommand {
+    Tokenize { filename: PathBuf },
+}
 
-    match command.as_str() {
-        "tokenize" => {
-            // You can use print statements as follows for debugging, they'll be visible when running tests.
-            eprintln!("Logs from your program will appear here!");
+fn main() -> Result<()> {
+    let args = Args::parse();
+    match args.command {
+        LoxCommand::Tokenize { filename } => {
+            let file_contents = std::fs::read_to_string(&filename)
+                .with_context(|| format!("reading input file {}", filename.display()))?;
 
-            let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
-                eprintln!("Failed to read file {}", filename);
-                String::new()
-            });
+            for token in Lexer::new(&file_contents) {
+                let token = match token {
+                    Ok(t) => t,
+                    Err(e) => {
+                        match e {
+                            LexError::InvalidToken(inner) => {
+                                eprintln!(
+                                    "[line {}] Error: Unexpected character: {}",
+                                    inner.line(),
+                                    inner.token
+                                );
+                            }
+                            LexError::InvalidNumber(_) => {}
+                            LexError::UnterminatedString(inner) => {
+                                eprintln!("[line {}] Error: Unterminated string.", inner.line());
+                            }
+                        }
+                        continue;
+                    }
+                };
 
-            // TODO: Uncomment the code below to pass the first stage
-            if !file_contents.is_empty() {
-                panic!("Scanner not implemented");
-            } else {
-                println!("EOF  null"); // Placeholder, replace this line when implementing the scanner
+                println!("{token}");
             }
-        }
-        _ => {
-            eprintln!("Unknown command: {}", command);
+
+            println!("EOF  null");
         }
     }
+
+    Ok(())
 }
