@@ -64,7 +64,7 @@ impl<'de> std::fmt::Display for Token<'de> {
                     write!(f, "NUMBER {source} {n}")
                 }
             }
-            TokenType::Ident => write!(f, "IDENT {source} null"),
+            TokenType::Ident => write!(f, "IDENTIFIER {source} null"),
             TokenType::And => write!(f, "AND and null"),
             TokenType::Class => write!(f, "CLASS class null"),
             TokenType::Else => write!(f, "ELSE else null"),
