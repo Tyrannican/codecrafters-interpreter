@@ -19,6 +19,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     match args.command {
         LoxCommand::Tokenize { filename } => {
+            let mut error_occurred = false;
             let file_contents = std::fs::read_to_string(&filename)
                 .with_context(|| format!("reading input file {}", filename.display()))?;
 
@@ -28,6 +29,7 @@ fn main() -> Result<()> {
                     Err(e) => {
                         match e {
                             LexError::InvalidToken(inner) => {
+                                error_occurred = true;
                                 eprintln!(
                                     "[line {}] Error: Unexpected character: {}",
                                     inner.line(),
@@ -36,6 +38,7 @@ fn main() -> Result<()> {
                             }
                             LexError::InvalidNumber(_) => {}
                             LexError::UnterminatedString(inner) => {
+                                error_occurred = true;
                                 eprintln!("[line {}] Error: Unterminated string.", inner.line());
                             }
                         }
@@ -47,6 +50,10 @@ fn main() -> Result<()> {
             }
 
             println!("EOF  null");
+
+            if error_occurred {
+                std::process::exit(65);
+            }
         }
     }
 

@@ -9,7 +9,7 @@ pub struct TokenError {
 
 impl TokenError {
     pub fn line(&self) -> usize {
-        let until_err = &self.src[..=self.offset];
+        let until_err = &self.src[..self.offset];
         until_err.lines().count()
     }
 }
