@@ -13,30 +13,30 @@ impl<'de> Parser<'de> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Expr<'de>, Error> {
+    pub fn parse(&mut self) -> Result<Ast<'de>, Error> {
         self.parse_statement(0)
     }
 
-    pub fn parse_statement(&mut self, min_bp: u8) -> Result<Expr<'de>, Error> {
+    pub fn parse_statement(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
         let mut lhs = match self.lexer.next() {
             Some(Ok(token)) => match token.class() {
-                Some(TokenClass::Atom(atom)) => Expr::Atom(atom),
+                Some(TokenClass::Atom(atom)) => Ast::Atom(atom),
                 Some(TokenClass::Op(op)) => match op {
                     Op::Group => {
                         let rhs = self.parse_statement(0)?;
                         self.lexer.expect(TokenType::RightParen)?;
-                        Expr::Cons(op, vec![rhs])
+                        Ast::Cons(op, vec![rhs])
                     }
                     Op::Minus | Op::Bang | Op::Return | Op::Print => {
                         let ((), rbp) = prefix_binding_power(op);
                         let rhs = self.parse_statement(rbp)?;
-                        Expr::Cons(op, vec![rhs])
+                        Ast::Cons(op, vec![rhs])
                     }
                     _ => anyhow::bail!("syntax error"),
                 },
                 None => anyhow::bail!("expected atom - found None"),
             },
-            None => return Ok(Expr::Atom(Atom::Nil)),
+            None => return Ok(Ast::Atom(Atom::Nil)),
             Some(Err(_)) => anyhow::bail!("syntax error"),
         };
 
@@ -62,7 +62,7 @@ impl<'de> Parser<'de> {
             }
             self.lexer.next();
             let rhs = self.parse_statement(rbp)?;
-            lhs = Expr::Cons(op, vec![lhs, rhs])
+            lhs = Ast::Cons(op, vec![lhs, rhs])
         }
 
         Ok(lhs)
@@ -92,12 +92,12 @@ fn infix_binding_power(op: Op) -> (u8, u8) {
     }
 }
 
-pub enum Expr<'de> {
+pub enum Ast<'de> {
     Atom(Atom<'de>),
-    Cons(Op, Vec<Expr<'de>>),
+    Cons(Op, Vec<Ast<'de>>),
 }
 
-impl<'de> std::fmt::Display for Expr<'de> {
+impl<'de> std::fmt::Display for Ast<'de> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Atom(a) => write!(f, "{a}"),

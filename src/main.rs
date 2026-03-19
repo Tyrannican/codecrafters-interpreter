@@ -2,6 +2,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use codecrafters_interpreter::{
+    evaluate::Evaluator,
     lex::{LexError, Lexer},
     parse::Parser as LoxParser,
 };
@@ -17,6 +18,7 @@ struct Args {
 enum LoxCommand {
     Tokenize { filename: PathBuf },
     Parse { filename: PathBuf },
+    Evaluate { filename: PathBuf },
 }
 
 fn main() -> Result<()> {
@@ -71,6 +73,22 @@ fn main() -> Result<()> {
                 }
             };
             println!("{ast}");
+        }
+
+        LoxCommand::Evaluate { filename } => {
+            let file_contents = std::fs::read_to_string(&filename)
+                .with_context(|| format!("reading input file {}", filename.display()))?;
+            let mut parser = LoxParser::new(&file_contents);
+            let ast = match parser.parse() {
+                Ok(ast) => ast,
+                Err(e) => {
+                    eprintln!("{}", e.to_string());
+                    std::process::exit(65);
+                }
+            };
+
+            let mut evaluator = Evaluator::new(ast);
+            evaluator.evaluate()?;
         }
     }
 
