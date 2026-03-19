@@ -24,6 +24,7 @@ impl<'de> Parser<'de> {
                 Some(TokenClass::Op(op)) => {
                     if op == Op::Group {
                         let rest = self.parse_statement(0)?;
+                        self.lexer.next();
                         Expr::Cons(op, vec![rest])
                     } else {
                         let ((), rbp) = prefix_binding_power(op);
@@ -83,7 +84,7 @@ fn infix_binding_power(op: Op) -> (u8, u8) {
         | Op::GreaterEqual
         | Op::Greater
         | Op::BangEqual
-        | Op::EqualEqual => (5, 6),
+        | Op::EqualEqual => (9, 10),
         Op::Field => (8, 7),
         _ => panic!("infix bad op: {op:?}"),
     }
