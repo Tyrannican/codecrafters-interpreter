@@ -273,7 +273,7 @@ pub enum Atom<'de> {
 impl std::fmt::Display for Atom<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::String(s) => write!(f, "{s}"),
+            Self::String(s) => write!(f, "{}", s.trim_matches('"')),
             Self::Number(n) => {
                 if *n == n.trunc() {
                     write!(f, "{n}.0")
