@@ -3,14 +3,12 @@ use anyhow::{Error, Result};
 
 #[derive(Debug)]
 pub struct Parser<'de> {
-    input: &'de str,
     lexer: Lexer<'de>,
 }
 
 impl<'de> Parser<'de> {
     pub fn new(input: &'de str) -> Self {
         Self {
-            input,
             lexer: Lexer::new(input),
         }
     }
@@ -26,7 +24,6 @@ impl<'de> Parser<'de> {
                 Some(TokenClass::Op(op)) => {
                     if op == Op::Group {
                         let rest = self.parse_statement(0)?;
-                        eprintln!("REST: {rest}");
                         Expr::Cons(op, vec![rest])
                     } else {
                         let ((), rbp) = prefix_binding_power(op);
@@ -61,49 +58,7 @@ impl<'de> Parser<'de> {
                 break;
             }
             self.lexer.next();
-            let rhs = self.parse_bp(rbp)?;
-            lhs = Expr::Cons(op, vec![lhs, rhs])
-        }
-
-        Ok(lhs)
-    }
-
-    fn parse_bp(&mut self, min_bp: u8) -> Result<Expr<'de>, Error> {
-        let mut lhs = match self.lexer.next() {
-            Some(Ok(token)) => match token.class() {
-                Some(TokenClass::Atom(atom)) => Expr::Atom(atom),
-                Some(TokenClass::Op(op)) => {
-                    let ((), rbp) = prefix_binding_power(op);
-                    let rhs = self.parse_bp(rbp)?;
-                    Expr::Cons(op, vec![rhs])
-                }
-                None => anyhow::bail!("expected atom - found None"),
-            },
-            None => return Ok(Expr::Atom(Atom::Nil)),
-            Some(Err(e)) => return Err(e.into()),
-        };
-
-        loop {
-            let op = self.lexer.peek();
-            if op.map_or(false, |op| op.is_err()) {
-                let err = self.lexer.next().expect("checked").expect_err("checked");
-                anyhow::bail!("encountered op parse error: {err}");
-            }
-
-            let op = match op.map(|res| res.as_ref().expect("checked err above")) {
-                Some(token) => match token.class() {
-                    Some(TokenClass::Op(op)) => op,
-                    _ => todo!(),
-                },
-                None => break,
-            };
-
-            let (lbp, rbp) = infix_binding_power(op);
-            if lbp < min_bp {
-                break;
-            }
-            self.lexer.next();
-            let rhs = self.parse_bp(rbp)?;
+            let rhs = self.parse_statement(rbp)?;
             lhs = Expr::Cons(op, vec![lhs, rhs])
         }
 
