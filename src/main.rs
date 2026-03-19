@@ -1,7 +1,10 @@
 #![allow(unused_variables)]
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use codecrafters_interpreter::lex::{LexError, Lexer};
+use codecrafters_interpreter::{
+    lex::{LexError, Lexer},
+    parse::Parser as LoxParser,
+};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -13,6 +16,7 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum LoxCommand {
     Tokenize { filename: PathBuf },
+    Parse { filename: PathBuf },
 }
 
 fn main() -> Result<()> {
@@ -54,6 +58,13 @@ fn main() -> Result<()> {
             if error_occurred {
                 std::process::exit(65);
             }
+        }
+        LoxCommand::Parse { filename } => {
+            let file_contents = std::fs::read_to_string(&filename)
+                .with_context(|| format!("reading input file {}", filename.display()))?;
+            let mut parser = LoxParser::new(&file_contents);
+            let ast = parser.parse()?;
+            println!("{ast}");
         }
     }
 
