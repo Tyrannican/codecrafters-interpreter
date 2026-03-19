@@ -63,7 +63,13 @@ fn main() -> Result<()> {
             let file_contents = std::fs::read_to_string(&filename)
                 .with_context(|| format!("reading input file {}", filename.display()))?;
             let mut parser = LoxParser::new(&file_contents);
-            let ast = parser.parse()?;
+            let ast = match parser.parse() {
+                Ok(ast) => ast,
+                Err(e) => {
+                    eprintln!("{}", e.to_string());
+                    std::process::exit(65);
+                }
+            };
             println!("{ast}");
         }
     }

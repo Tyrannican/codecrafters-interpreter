@@ -1,4 +1,4 @@
-use crate::lex::{Atom, Lexer, Op, TokenClass};
+use crate::lex::{Atom, Lexer, Op, TokenClass, TokenType};
 use anyhow::{Error, Result};
 
 #[derive(Debug)]
@@ -21,21 +21,23 @@ impl<'de> Parser<'de> {
         let mut lhs = match self.lexer.next() {
             Some(Ok(token)) => match token.class() {
                 Some(TokenClass::Atom(atom)) => Expr::Atom(atom),
-                Some(TokenClass::Op(op)) => {
-                    if op == Op::Group {
-                        let rest = self.parse_statement(0)?;
-                        self.lexer.next();
-                        Expr::Cons(op, vec![rest])
-                    } else {
+                Some(TokenClass::Op(op)) => match op {
+                    Op::Group => {
+                        let rhs = self.parse_statement(0)?;
+                        self.lexer.expect(TokenType::RightParen)?;
+                        Expr::Cons(op, vec![rhs])
+                    }
+                    Op::Minus | Op::Bang | Op::Return | Op::Print => {
                         let ((), rbp) = prefix_binding_power(op);
                         let rhs = self.parse_statement(rbp)?;
                         Expr::Cons(op, vec![rhs])
                     }
-                }
+                    _ => anyhow::bail!("syntax error"),
+                },
                 None => anyhow::bail!("expected atom - found None"),
             },
             None => return Ok(Expr::Atom(Atom::Nil)),
-            Some(Err(e)) => return Err(e.into()),
+            Some(Err(_)) => anyhow::bail!("syntax error"),
         };
 
         loop {

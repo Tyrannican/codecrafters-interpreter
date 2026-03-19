@@ -52,6 +52,20 @@ impl<'de> Lexer<'de> {
         self.peeked = self.next();
         self.peeked.as_ref()
     }
+
+    pub fn expect(&mut self, token_type: TokenType) -> Result<(), anyhow::Error> {
+        match self.next() {
+            Some(Ok(token)) => {
+                if token.subtype != token_type {
+                    anyhow::bail!("expected {:?} found {:?}", token_type, token.subtype);
+                }
+            }
+            Some(Err(e)) => anyhow::bail!("{}", e.to_string()),
+            None => anyhow::bail!("unexpected eof"),
+        }
+
+        Ok(())
+    }
 }
 
 impl<'de> Iterator for Lexer<'de> {
