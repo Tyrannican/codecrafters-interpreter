@@ -18,6 +18,7 @@ impl<'de> Evaluator<'de> {
         match self.ast {
             Ast::Cons(op, ref args) => self.parse_operation(op, args),
             Ast::Atom(atom) => self.parse_atom(atom),
+            _ => todo!(),
         }
 
         Ok(())

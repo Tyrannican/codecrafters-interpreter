@@ -53,18 +53,23 @@ impl<'de> Lexer<'de> {
         self.peeked.as_ref()
     }
 
-    pub fn expect(&mut self, token_type: TokenType) -> Result<(), anyhow::Error> {
-        match self.next() {
+    pub fn is_empty(&self) -> bool {
+        self.rest.is_empty()
+    }
+
+    pub fn expect(&mut self, token_type: TokenType) -> Result<Token<'de>, anyhow::Error> {
+        let token = match self.next() {
             Some(Ok(token)) => {
                 if token.subtype != token_type {
                     anyhow::bail!("expected {:?} found {:?}", token_type, token.subtype);
                 }
+                token
             }
             Some(Err(e)) => anyhow::bail!("{}", e.to_string()),
             None => anyhow::bail!("unexpected eof"),
-        }
+        };
 
-        Ok(())
+        Ok(token)
     }
 }
 
@@ -306,6 +311,7 @@ impl std::fmt::Display for Atom<'_> {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Op {
+    Assign,
     Minus,
     Plus,
     Star,
@@ -325,6 +331,7 @@ pub enum Op {
     Print,
     Return,
     Field,
+    Fun,
     Var,
     While,
     Group,
@@ -333,6 +340,7 @@ pub enum Op {
 impl std::fmt::Display for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Assign => write!(f, "="),
             Self::Minus => write!(f, "-"),
             Self::Plus => write!(f, "+"),
             Self::Star => write!(f, "*"),
@@ -355,14 +363,15 @@ impl std::fmt::Display for Op {
             Self::Var => write!(f, "var"),
             Self::While => write!(f, "while"),
             Self::Group => write!(f, "group"),
+            Self::Fun => write!(f, "fun"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Token<'de> {
-    source: &'de str,
-    offset: usize,
+    pub source: &'de str,
+    pub offset: usize,
     pub subtype: TokenType,
 }
 
@@ -375,7 +384,6 @@ impl<'de> Token<'de> {
             | TokenType::RightBrace
             | TokenType::Comma
             | TokenType::Semicolon
-            | TokenType::Equal
             | TokenType::If
             | TokenType::Else
             | TokenType::Fun => None,
@@ -391,6 +399,7 @@ impl<'de> Token<'de> {
             TokenType::Ident => Some(TokenClass::Atom(Atom::Ident(self.source))),
 
             // Operations
+            TokenType::Equal => Some(TokenClass::Op(Op::Assign)),
             TokenType::Star => Some(TokenClass::Op(Op::Star)),
             TokenType::Dot => Some(TokenClass::Op(Op::Field)),
             TokenType::Plus => Some(TokenClass::Op(Op::Plus)),

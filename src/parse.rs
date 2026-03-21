@@ -1,4 +1,4 @@
-use crate::lex::{Atom, Lexer, Op, TokenClass, TokenType};
+use crate::lex::{Atom, Lexer, Op, Token, TokenClass, TokenType};
 use anyhow::{Error, Result};
 
 #[derive(Debug)]
@@ -14,22 +14,101 @@ impl<'de> Parser<'de> {
     }
 
     pub fn parse(&mut self) -> Result<Ast<'de>, Error> {
-        self.parse_statement(0)
+        let mut statements = Vec::new();
+        self.parse_program()?;
+        // loop {
+        //     statements.push(self.parse_statement(0)?);
+        //     if self.lexer.is_empty() {
+        //         break;
+        //     }
+
+        //     self.lexer.expect(TokenType::Semicolon)?;
+        // }
+
+        Ok(Ast::Program(statements))
     }
 
-    pub fn parse_statement(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
+    fn parse_program(&mut self) -> Result<(), Error> {
+        let mut statements = Vec::new();
+        match self.lexer.next() {
+            Some(Ok(token)) => match token.subtype {
+                TokenType::Fun => statements.push(self.parse_function()?),
+                TokenType::Class => statements.push(self.parse_class()?),
+                _ => statements.push(self.parse_statement()?),
+            },
+            Some(Err(e)) => anyhow::bail!("syntax error: {}", e.to_string()),
+            None => {}
+        }
+
+        todo!()
+    }
+
+    fn parse_statement(&mut self) -> Result<Ast<'de>, Error> {
+        todo!()
+    }
+
+    fn parse_function(&mut self) -> Result<Ast<'de>, Error> {
+        let next = self.lexer.expect(TokenType::Ident)?;
+        let name = Atom::Ident(next.source);
+        self.lexer.expect(TokenType::LeftParen)?;
+        let mut func_params = Vec::new();
+        if !matches!(
+            self.lexer.peek(),
+            Some(Ok(Token {
+                subtype: TokenType::RightParen,
+                ..
+            }))
+        ) {
+            loop {
+                let param = self.lexer.expect(TokenType::Ident)?;
+                func_params.push(param);
+
+                match self.lexer.next() {
+                    Some(Ok(Token {
+                        subtype: TokenType::Comma,
+                        ..
+                    })) => continue,
+                    Some(Ok(Token {
+                        subtype: TokenType::RightParen,
+                        ..
+                    })) => break,
+                    _ => anyhow::bail!("syntax error in function declaration"),
+                }
+            }
+        }
+
+        let block = self.parse_block()?;
+        Ok(Ast::Function {
+            name,
+            parameters: func_params,
+            block: Box::new(block),
+        })
+    }
+
+    fn parse_class(&mut self) -> Result<Ast<'de>, Error> {
+        todo!()
+    }
+
+    fn parse_block(&mut self) -> Result<Ast<'de>, Error> {
+        self.lexer.expect(TokenType::LeftBrace)?;
+        self.lexer.expect(TokenType::RightBrace)?;
+
+        Ok(Ast::Block(Vec::new()))
+    }
+
+    pub fn parse_statement_old(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
         let mut lhs = match self.lexer.next() {
             Some(Ok(token)) => match token.class() {
                 Some(TokenClass::Atom(atom)) => Ast::Atom(atom),
                 Some(TokenClass::Op(op)) => match op {
                     Op::Group => {
-                        let rhs = self.parse_statement(0)?;
+                        let rhs = self.parse_statement_old(0)?;
                         self.lexer.expect(TokenType::RightParen)?;
                         Ast::Cons(op, vec![rhs])
                     }
                     Op::Minus | Op::Bang | Op::Return | Op::Print => {
                         let ((), rbp) = prefix_binding_power(op);
-                        let rhs = self.parse_statement(rbp)?;
+                        let rhs = self.parse_statement_old(rbp)?;
                         Ast::Cons(op, vec![rhs])
                     }
                     _ => anyhow::bail!("syntax error"),
@@ -61,7 +140,7 @@ impl<'de> Parser<'de> {
                 break;
             }
             self.lexer.next();
-            let rhs = self.parse_statement(rbp)?;
+            let rhs = self.parse_statement_old(rbp)?;
             lhs = Ast::Cons(op, vec![lhs, rhs])
         }
 
@@ -79,8 +158,9 @@ fn prefix_binding_power(op: Op) -> ((), u8) {
 
 fn infix_binding_power(op: Op) -> (u8, u8) {
     match op {
-        Op::Plus | Op::Minus => (1, 2),
-        Op::Star | Op::Slash => (3, 4),
+        Op::Assign => (2, 1),
+        Op::Plus | Op::Minus => (3, 4),
+        Op::Star | Op::Slash => (5, 6),
         Op::LessEqual
         | Op::Less
         | Op::GreaterEqual
@@ -95,6 +175,13 @@ fn infix_binding_power(op: Op) -> (u8, u8) {
 pub enum Ast<'de> {
     Atom(Atom<'de>),
     Cons(Op, Vec<Ast<'de>>),
+    Function {
+        name: Atom<'de>,
+        parameters: Vec<Token<'de>>,
+        block: Box<Ast<'de>>,
+    },
+    Block(Vec<Ast<'de>>),
+    Program(Vec<Ast<'de>>),
 }
 
 impl<'de> std::fmt::Display for Ast<'de> {
@@ -108,6 +195,32 @@ impl<'de> std::fmt::Display for Ast<'de> {
                 }
 
                 write!(f, ")")
+            }
+            Self::Function {
+                name,
+                parameters,
+                block,
+            } => {
+                write!(f, "(fun {name}")?;
+                for param in parameters {
+                    write!(f, " {param}")?;
+                }
+
+                write!(f, "{block})")
+            }
+            Self::Block(block) => {
+                for item in block {
+                    write!(f, "{item}")?;
+                }
+
+                Ok(())
+            }
+            Self::Program(tree) => {
+                for entry in tree.iter() {
+                    write!(f, "{entry} ")?;
+                }
+
+                Ok(())
             }
         }
     }
