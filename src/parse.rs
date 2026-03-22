@@ -34,7 +34,7 @@ impl<'de> Parser<'de> {
             Some(Ok(token)) => match token.subtype {
                 TokenType::Fun => statements.push(self.parse_function()?),
                 TokenType::Class => statements.push(self.parse_class()?),
-                _ => statements.push(self.parse_statement()?),
+                _ => statements.push(self.parse_statement(0)?),
             },
             Some(Err(e)) => anyhow::bail!("syntax error: {}", e.to_string()),
             None => {}
@@ -43,7 +43,48 @@ impl<'de> Parser<'de> {
         todo!()
     }
 
-    fn parse_statement(&mut self) -> Result<Ast<'de>, Error> {
+    fn parse_statement(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
+        let lhs = match self.lexer.next() {
+            Some(Ok(token)) => token,
+            None => return Ok(Ast::Atom(Atom::Nil)),
+            Some(Err(e)) => return Err(e.into()),
+        };
+
+        let mut lhs = match lhs.subtype {
+            TokenType::Ident => Ast::Atom(Atom::Ident(lhs.source)),
+            TokenType::Super => Ast::Atom(Atom::Super),
+            TokenType::This => Ast::Atom(Atom::This),
+            TokenType::LeftParen => {
+                let lhs = self.parse_statement(0)?;
+                self.lexer.expect(TokenType::RightParen)?;
+                Ast::Cons(Op::Group, vec![lhs])
+            }
+            TokenType::Print | TokenType::Return => {
+                let op = match lhs.subtype {
+                    TokenType::Print => Op::Print,
+                    TokenType::Return => Op::Return,
+                    _ => unreachable!("by the match pattern outside"),
+                };
+
+                let ((), r_bp) = prefix_binding_power(op);
+                let rhs = self.parse_statement(r_bp)?;
+                Ast::Cons(op, vec![rhs])
+            }
+            _ => todo!(),
+        };
+
+        loop {
+            let op = self.lexer.peek();
+            if op.map_or(false, |op| op.is_err()) {
+                todo!("some error here");
+            }
+
+            let op = match op.map(|res| res.as_ref().expect("handled above")) {
+                None => break,
+                _ => todo!(),
+            };
+        }
+
         todo!()
     }
 
