@@ -71,6 +71,29 @@ impl<'de> Lexer<'de> {
 
         Ok(token)
     }
+
+    pub fn expect_choice(
+        &mut self,
+        token_types: &[TokenType],
+    ) -> Result<Token<'de>, anyhow::Error> {
+        match self.next() {
+            Some(Ok(token)) => {
+                for tt in token_types {
+                    if token.subtype == *tt {
+                        return Ok(token);
+                    }
+                }
+
+                anyhow::bail!(
+                    "expected one of {:?} found {:?}",
+                    token_types,
+                    token.subtype
+                );
+            }
+            Some(Err(e)) => anyhow::bail!("{}", e.to_string()),
+            None => anyhow::bail!("unexpected eof"),
+        }
+    }
 }
 
 impl<'de> Iterator for Lexer<'de> {
@@ -376,6 +399,34 @@ pub struct Token<'de> {
 }
 
 impl<'de> Token<'de> {
+    pub fn operation(&self) -> Result<Op, anyhow::Error> {
+        match self.subtype {
+            TokenType::Equal => Ok(Op::Assign),
+            TokenType::Star => Ok(Op::Star),
+            TokenType::Dot => Ok(Op::Field),
+            TokenType::Plus => Ok(Op::Plus),
+            TokenType::Minus => Ok(Op::Minus),
+            TokenType::EqualEqual => Ok(Op::EqualEqual),
+            TokenType::Bang => Ok(Op::Bang),
+            TokenType::BangEqual => Ok(Op::BangEqual),
+            TokenType::Less => Ok(Op::Less),
+            TokenType::LessEqual => Ok(Op::LessEqual),
+            TokenType::Greater => Ok(Op::Greater),
+            TokenType::GreaterEqual => Ok(Op::GreaterEqual),
+            TokenType::Slash => Ok(Op::Slash),
+            TokenType::And => Ok(Op::And),
+            TokenType::Class => Ok(Op::Class),
+            TokenType::For => Ok(Op::For),
+            TokenType::Or => Ok(Op::Or),
+            TokenType::Print => Ok(Op::Print),
+            TokenType::Return => Ok(Op::Return),
+            TokenType::Var => Ok(Op::Var),
+            TokenType::While => Ok(Op::While),
+            TokenType::LeftParen => Ok(Op::Group),
+            _ => anyhow::bail!("expected operation - found {:?}", self.subtype),
+        }
+    }
+
     pub fn class(&self) -> Option<TokenClass<'de>> {
         match self.subtype {
             // Handled by the parser
