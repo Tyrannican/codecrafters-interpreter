@@ -41,7 +41,7 @@ impl<'de> Parser<'de> {
         ) {
             loop {
                 let param = self.lexer.expect(TokenType::Ident)?;
-                func_params.push(param);
+                func_params.push(Ast::Atom(Atom::Ident(param.source)));
 
                 match self.lexer.next() {
                     Some(Ok(Token {
@@ -394,7 +394,7 @@ pub enum Ast<'de> {
     Cons(Op, Vec<Ast<'de>>),
     Function {
         name: Atom<'de>,
-        parameters: Vec<Token<'de>>, // TODO: Make this Ast Atoms
+        parameters: Vec<Ast<'de>>, // TODO: Make this Ast Atoms
         block: Box<Ast<'de>>,
     },
     If {
