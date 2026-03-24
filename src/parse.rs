@@ -198,13 +198,13 @@ impl<'de> Parser<'de> {
                     no: other.map(Box::new),
                 });
             }
-            _ => self.parse_expression(0)?,
+            _ => self.parse_top_level_expression(&lhs, 0)?,
         };
 
         loop {
             let op = self.lexer.peek();
             if op.map_or(false, |op| op.is_err()) {
-                todo!("some error here");
+                anyhow::bail!("unexpected eof???");
             }
 
             let op = match op.map(|res| res.as_ref().expect("handled above")) {
@@ -217,7 +217,7 @@ impl<'de> Parser<'de> {
                     subtype: TokenType::Dot,
                     ..
                 }) => Op::Field,
-                _ => anyhow::bail!("expected an operator {op:?}"),
+                Some(token) => token.operation()?,
             };
 
             if let Some((lbp, ())) = postfix_binding_power(op) {
@@ -252,6 +252,112 @@ impl<'de> Parser<'de> {
 
         Ok(lhs)
     }
+
+    fn parse_top_level_expression(
+        &mut self,
+        token: &Token<'de>,
+        min_bp: u8,
+    ) -> Result<Ast<'de>, Error> {
+        let mut lhs = match token.subtype {
+            TokenType::String => Ast::Atom(Atom::String(token.source)),
+            TokenType::Number(n) => Ast::Atom(Atom::Number(n)),
+            TokenType::True => Ast::Atom(Atom::Bool(true)),
+            TokenType::False => Ast::Atom(Atom::Bool(false)),
+            TokenType::Nil => Ast::Atom(Atom::Nil),
+            TokenType::Ident => Ast::Atom(Atom::Ident(token.source)),
+            TokenType::Super => Ast::Atom(Atom::Super),
+            TokenType::This => Ast::Atom(Atom::This),
+            TokenType::LeftParen => {
+                let lhs = self.parse_expression(0)?;
+                self.lexer.expect(TokenType::RightParen)?;
+                Ast::Cons(Op::Group, vec![lhs])
+            }
+            TokenType::Bang | TokenType::Minus => {
+                let op = match token.subtype {
+                    TokenType::Bang => Op::Bang,
+                    TokenType::Minus => Op::Minus,
+                    _ => unreachable!("from the outer match pattern"),
+                };
+
+                let ((), rbp) = prefix_binding_power(op);
+                let rhs = self.parse_expression(rbp)?;
+                Ast::Cons(op, vec![rhs])
+            }
+            _ => anyhow::bail!("expected an expression - unexpected token {token:?}"),
+        };
+
+        loop {
+            let op = self.lexer.peek();
+            if op.map_or(false, |op| op.is_err()) {
+                let next = self
+                    .lexer
+                    .next()
+                    .expect("checked above")
+                    .expect_err("checked again");
+                anyhow::bail!("expected operator - found {next:?}");
+            }
+
+            let op = match op.map(|res| res.as_ref().expect("handled above")) {
+                None => break,
+                Some(Token {
+                    subtype:
+                        TokenType::RightParen
+                        | TokenType::Comma
+                        | TokenType::Semicolon
+                        | TokenType::RightBrace,
+                    ..
+                }) => break,
+                Some(Token {
+                    subtype: TokenType::LeftParen,
+                    ..
+                }) => Op::Call,
+                Some(token) => token.operation()?,
+            };
+
+            if let Some((lbp, ())) = postfix_binding_power(op) {
+                if lbp < min_bp {
+                    break;
+                }
+                self.lexer.next();
+
+                lhs = match op {
+                    Op::Call => Ast::Call {
+                        caller: Box::new(lhs),
+                        arguments: self.parse_function_call()?,
+                    },
+                    _ => Ast::Cons(op, vec![lhs]),
+                };
+
+                continue;
+            }
+
+            if let Some((lbp, rbp)) = infix_binding_power(op) {
+                if lbp < min_bp {
+                    break;
+                }
+
+                self.lexer.next();
+                let rhs = self.parse_expression(rbp)?;
+                lhs = Ast::Cons(op, vec![lhs, rhs]);
+                continue;
+            }
+
+            break;
+        }
+
+        if matches!(
+            self.lexer.peek(),
+            Some(Ok(Token {
+                subtype: TokenType::Semicolon,
+                ..
+            }))
+        ) {
+            self.lexer.next();
+        }
+
+        Ok(lhs)
+    }
+
     fn parse_expression(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
         let lhs = match self.lexer.next() {
             Some(Ok(token)) => token,
@@ -308,6 +414,10 @@ impl<'de> Parser<'de> {
                         | TokenType::RightBrace,
                     ..
                 }) => break,
+                Some(Token {
+                    subtype: TokenType::LeftParen,
+                    ..
+                }) => Op::Call,
                 Some(token) => token.operation()?,
             };
 
@@ -359,7 +469,7 @@ impl<'de> Parser<'de> {
 fn prefix_binding_power(op: Op) -> ((), u8) {
     match op {
         Op::Print | Op::Return => ((), 1),
-        Op::Minus | Op::Bang => ((), 5),
+        Op::Minus | Op::Bang => ((), 11),
         _ => panic!("bad op: {op:?}"),
     }
 }
@@ -368,7 +478,7 @@ fn infix_binding_power(op: Op) -> Option<(u8, u8)> {
     let res = match op {
         Op::Assign => (2, 1),
         Op::Plus | Op::Minus => (3, 4),
-        Op::Star | Op::Slash => (5, 6),
+        Op::Star | Op::Slash => (7, 8),
         Op::LessEqual
         | Op::Less
         | Op::GreaterEqual
@@ -394,7 +504,7 @@ pub enum Ast<'de> {
     Cons(Op, Vec<Ast<'de>>),
     Function {
         name: Atom<'de>,
-        parameters: Vec<Ast<'de>>, // TODO: Make this Ast Atoms
+        parameters: Vec<Ast<'de>>,
         block: Box<Ast<'de>>,
     },
     If {
@@ -444,7 +554,7 @@ impl<'de> std::fmt::Display for Ast<'de> {
             }
             Self::Program(tree) => {
                 for entry in tree.iter() {
-                    write!(f, "{entry} ")?;
+                    write!(f, "{entry}")?;
                 }
 
                 Ok(())
