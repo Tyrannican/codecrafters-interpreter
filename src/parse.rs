@@ -126,6 +126,21 @@ impl<'de> Parser<'de> {
             TokenType::Ident => Ast::Atom(Atom::Ident(lhs.source)),
             TokenType::Super => Ast::Atom(Atom::Super),
             TokenType::This => Ast::Atom(Atom::This),
+            TokenType::LeftBrace => {
+                let mut statements = Vec::new();
+                while !matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::RightBrace,
+                        ..
+                    })),
+                ) {
+                    statements.push(self.parse_statement(0)?);
+                }
+                self.lexer.expect(TokenType::RightBrace)?;
+
+                return Ok(Ast::Block(statements));
+            }
             TokenType::LeftParen => {
                 let lhs = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::RightParen)?;
@@ -178,7 +193,17 @@ impl<'de> Parser<'de> {
                 self.lexer.expect(TokenType::LeftParen)?;
                 let condition = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::RightParen)?;
-                let block = self.parse_block()?;
+                let block = if !matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::LeftBrace,
+                        ..
+                    }))
+                ) {
+                    self.parse_expression(0)?
+                } else {
+                    self.parse_block()?
+                };
                 let mut other = None;
 
                 if matches!(
@@ -217,6 +242,10 @@ impl<'de> Parser<'de> {
                     subtype: TokenType::Dot,
                     ..
                 }) => Op::Field,
+                Some(Token {
+                    subtype: TokenType::Semicolon,
+                    ..
+                }) => break,
                 Some(token) => token.operation()?,
             };
 
@@ -263,7 +292,7 @@ impl<'de> Parser<'de> {
             TokenType::Number(n) => Ast::Atom(Atom::Number(n)),
             TokenType::True => Ast::Atom(Atom::Bool(true)),
             TokenType::False => Ast::Atom(Atom::Bool(false)),
-            TokenType::Nil => Ast::Atom(Atom::Nil),
+            TokenType::Semicolon | TokenType::Nil => Ast::Atom(Atom::Nil),
             TokenType::Ident => Ast::Atom(Atom::Ident(token.source)),
             TokenType::Super => Ast::Atom(Atom::Super),
             TokenType::This => Ast::Atom(Atom::This),
@@ -370,7 +399,7 @@ impl<'de> Parser<'de> {
             TokenType::Number(n) => Ast::Atom(Atom::Number(n)),
             TokenType::True => Ast::Atom(Atom::Bool(true)),
             TokenType::False => Ast::Atom(Atom::Bool(false)),
-            TokenType::Nil => Ast::Atom(Atom::Nil),
+            TokenType::Semicolon | TokenType::Nil => Ast::Atom(Atom::Nil),
             TokenType::Ident => Ast::Atom(Atom::Ident(lhs.source)),
             TokenType::Super => Ast::Atom(Atom::Super),
             TokenType::This => Ast::Atom(Atom::This),

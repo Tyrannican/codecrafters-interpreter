@@ -87,7 +87,7 @@ fn main() -> Result<()> {
                 }
             };
 
-            let mut evaluator = Evaluator::new(ast);
+            let mut evaluator = Evaluator::new(&ast);
             evaluator.evaluate()?;
         }
     }
