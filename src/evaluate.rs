@@ -33,7 +33,7 @@ impl<'de> Evaluator<'de> {
     fn evaluate_statement(&mut self, ast: &'de Ast<'de>) -> Result<Outcome<'de>> {
         match ast {
             Ast::Atom(atom) => match atom {
-                Atom::String(s) => return Ok(Outcome::String(Cow::Borrowed(s))),
+                Atom::String(s) => return Ok(Outcome::String(Cow::Borrowed(s.trim_matches('"')))),
                 Atom::Number(n) => return Ok(Outcome::Number(*n)),
                 Atom::Bool(b) => return Ok(Outcome::Boolean(*b)),
                 Atom::Nil => return Ok(Outcome::Nil),
