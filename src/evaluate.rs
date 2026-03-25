@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{
     lex::{Atom, Op},
     parse::Ast,
@@ -31,7 +33,7 @@ impl<'de> Evaluator<'de> {
     fn evaluate_statement(&mut self, ast: &'de Ast<'de>) -> Result<Outcome<'de>> {
         match ast {
             Ast::Atom(atom) => match atom {
-                Atom::String(s) => return Ok(Outcome::String(*s)),
+                Atom::String(s) => return Ok(Outcome::String(Cow::Borrowed(s))),
                 Atom::Number(n) => return Ok(Outcome::Number(*n)),
                 Atom::Bool(b) => return Ok(Outcome::Boolean(*b)),
                 Atom::Nil => return Ok(Outcome::Nil),
@@ -50,9 +52,52 @@ impl<'de> Evaluator<'de> {
 
                         return Ok(Outcome::Number(-n));
                     } else {
-                        todo!("implement negation for two items");
+                        let lhs = self.evaluate_statement(&args[0])?;
+                        let rhs = self.evaluate_statement(&args[1])?;
+                        if !self.are_numbers(&lhs, &rhs) {
+                            anyhow::bail!("operands must be numbers: {lhs} {rhs}");
+                        }
+                        let Outcome::Number(left) = lhs else {
+                            unreachable!("checked above");
+                        };
+
+                        let Outcome::Number(right) = rhs else {
+                            unreachable!("checked above");
+                        };
+
+                        return Ok(Outcome::Number(left - right));
                     }
                 }
+
+                Op::Plus => {
+                    let lhs = self.evaluate_statement(&args[0])?;
+                    let rhs = self.evaluate_statement(&args[1])?;
+
+                    if self.are_numbers(&lhs, &rhs) {
+                        let Outcome::Number(left) = lhs else {
+                            unreachable!("checked above");
+                        };
+
+                        let Outcome::Number(right) = rhs else {
+                            unreachable!("checked above");
+                        };
+
+                        return Ok(Outcome::Number(left + right));
+                    } else if self.are_strings(&lhs, &rhs) {
+                        let Outcome::String(left) = lhs else {
+                            unreachable!("checked above");
+                        };
+
+                        let Outcome::String(right) = rhs else {
+                            unreachable!("checked above");
+                        };
+
+                        return Ok(Outcome::String(Cow::Owned(format!("{left}{right}"))));
+                    } else {
+                        anyhow::bail!("operands must be either numbers or strings {lhs} {rhs}");
+                    }
+                }
+
                 Op::Bang => {
                     let outcome = match self.evaluate_statement(&args[0])? {
                         Outcome::String(_) | Outcome::Number(_) => Outcome::Boolean(false),
@@ -67,9 +112,16 @@ impl<'de> Evaluator<'de> {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
-                    // TODO: extract separately, we need the boolean check for concatenation of
-                    // string
-                    let (left, right) = self.number_check(lhs, rhs)?;
+                    if !self.are_numbers(&lhs, &rhs) {
+                        anyhow::bail!("operands must be numbers: {lhs} {rhs}");
+                    }
+                    let Outcome::Number(left) = lhs else {
+                        unreachable!("checked above");
+                    };
+
+                    let Outcome::Number(right) = rhs else {
+                        unreachable!("checked above");
+                    };
 
                     if *op == Op::Star {
                         return Ok(Outcome::Number(left * right));
@@ -83,26 +135,18 @@ impl<'de> Evaluator<'de> {
         }
     }
 
-    fn number_check(&self, left: Outcome<'de>, right: Outcome<'de>) -> Result<(f64, f64)> {
-        if !matches!(left, Outcome::Number(_)) && !matches!(right, Outcome::Number(_)) {
-            anyhow::bail!("Operands must be numbers: {left} {right}");
-        }
+    fn are_numbers(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
+        matches!(left, Outcome::Number(_)) && matches!(right, Outcome::Number(_))
+    }
 
-        let Outcome::Number(left) = left else {
-            unreachable!("checked above");
-        };
-
-        let Outcome::Number(right) = right else {
-            unreachable!("checked above");
-        };
-
-        Ok((left, right))
+    fn are_strings(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
+        matches!(left, Outcome::String(_)) && matches!(right, Outcome::String(_))
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Outcome<'de> {
-    String(&'de str),
+    String(Cow<'de, str>),
     Number(f64),
     Boolean(bool),
     Nil,
