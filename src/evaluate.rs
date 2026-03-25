@@ -98,6 +98,32 @@ impl<'de> Evaluator<'de> {
                     }
                 }
 
+                Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual | Op::EqualEqual => {
+                    let lhs = self.evaluate_statement(&args[0])?;
+                    let rhs = self.evaluate_statement(&args[1])?;
+
+                    if !self.are_numbers(&lhs, &rhs) {
+                        anyhow::bail!("operands must be numbers {lhs} {rhs}");
+                    }
+
+                    let Outcome::Number(left) = lhs else {
+                        unreachable!("checked above");
+                    };
+
+                    let Outcome::Number(right) = rhs else {
+                        unreachable!("checked above");
+                    };
+
+                    match op {
+                        Op::GreaterEqual => return Ok(Outcome::Boolean(left >= right)),
+                        Op::Greater => return Ok(Outcome::Boolean(left > right)),
+                        Op::LessEqual => return Ok(Outcome::Boolean(left <= right)),
+                        Op::Less => return Ok(Outcome::Boolean(left < right)),
+                        Op::EqualEqual => return Ok(Outcome::Boolean(left == right)),
+                        _ => unreachable!("checked above"),
+                    }
+                }
+
                 Op::Bang => {
                     let outcome = match self.evaluate_statement(&args[0])? {
                         Outcome::String(_) | Outcome::Number(_) => Outcome::Boolean(false),
