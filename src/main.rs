@@ -88,7 +88,13 @@ fn main() -> Result<()> {
             };
 
             let mut evaluator = Evaluator::new(&ast);
-            evaluator.evaluate()?;
+            match evaluator.evaluate() {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("{}", e.to_string());
+                    std::process::exit(70);
+                }
+            }
         }
     }
 

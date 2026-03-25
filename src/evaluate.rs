@@ -42,6 +42,26 @@ impl<'de> Evaluator<'de> {
                     let lhs = &args[0];
                     return self.evaluate_statement(lhs);
                 }
+                Op::Minus => {
+                    if args.len() == 1 {
+                        let Outcome::Number(n) = self.evaluate_statement(&args[0])? else {
+                            anyhow::bail!("Operator must be a number");
+                        };
+
+                        return Ok(Outcome::Number(-n));
+                    } else {
+                        todo!("implement negation for two items");
+                    }
+                }
+                Op::Bang => {
+                    let outcome = match self.evaluate_statement(&args[0])? {
+                        Outcome::String(_) | Outcome::Number(_) => Outcome::Boolean(false),
+                        Outcome::Nil => Outcome::Boolean(true),
+                        Outcome::Boolean(b) => Outcome::Boolean(!b),
+                    };
+
+                    return Ok(outcome);
+                }
                 _ => todo!("implement operation: {op}"),
             },
             other => todo!("need to implement {other}"),
@@ -49,6 +69,7 @@ impl<'de> Evaluator<'de> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
 enum Outcome<'de> {
     String(&'de str),
     Number(f64),
