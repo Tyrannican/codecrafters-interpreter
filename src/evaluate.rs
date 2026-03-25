@@ -62,10 +62,41 @@ impl<'de> Evaluator<'de> {
 
                     return Ok(outcome);
                 }
+                Op::Star | Op::Slash => {
+                    assert!(args.len() > 1);
+                    let lhs = self.evaluate_statement(&args[0])?;
+                    let rhs = self.evaluate_statement(&args[1])?;
+
+                    // TODO: extract separately, we need the boolean check for concatenation of
+                    // string
+                    let (left, right) = self.number_check(lhs, rhs)?;
+
+                    if *op == Op::Star {
+                        return Ok(Outcome::Number(left * right));
+                    } else {
+                        return Ok(Outcome::Number(left / right));
+                    }
+                }
                 _ => todo!("implement operation: {op}"),
             },
             other => todo!("need to implement {other}"),
         }
+    }
+
+    fn number_check(&self, left: Outcome<'de>, right: Outcome<'de>) -> Result<(f64, f64)> {
+        if !matches!(left, Outcome::Number(_)) && !matches!(right, Outcome::Number(_)) {
+            anyhow::bail!("Operands must be numbers: {left} {right}");
+        }
+
+        let Outcome::Number(left) = left else {
+            unreachable!("checked above");
+        };
+
+        let Outcome::Number(right) = right else {
+            unreachable!("checked above");
+        };
+
+        Ok((left, right))
     }
 }
 
