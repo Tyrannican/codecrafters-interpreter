@@ -84,7 +84,7 @@ impl<'de> Evaluator<'de> {
 
                     if let Some(assignment) = self.assignments.get_mut(&var) {
                         *assignment = rhs.clone();
-                        Outcome::Nil
+                        rhs
                     } else {
                         Outcome::create_error(format!("undeclared variable: {var}"), 70)
                     }
@@ -299,6 +299,20 @@ impl<'de> Evaluator<'de> {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
+                    let lhs = match lhs {
+                        Outcome::Ident(i) => {
+                            if let Some(var) = self.lookup_assignment(&i) {
+                                var
+                            } else {
+                                return Ok(Outcome::create_error(
+                                    format!("undeclared variable: {i}"),
+                                    70,
+                                ));
+                            }
+                        }
+                        _ => lhs,
+                    };
+
                     if !self.check_numbers(&lhs, &rhs) {
                         return Ok(Outcome::Error((
                             format!("operands must be numbers: {lhs} {rhs}"),
@@ -322,6 +336,7 @@ impl<'de> Evaluator<'de> {
 
                 Op::Print => {
                     let lhs = self.evaluate_statement(&args[0])?;
+                    eprintln!("Op: {op} Args: {args:?} LHS: {lhs}");
                     if lhs == Outcome::Nil {
                         Outcome::Error(("invalid print expression".to_string(), 70))
                     } else {
