@@ -54,7 +54,7 @@ impl<'de> Evaluator<'de> {
                     } else {
                         let lhs = self.evaluate_statement(&args[0])?;
                         let rhs = self.evaluate_statement(&args[1])?;
-                        if !self.are_numbers(&lhs, &rhs) {
+                        if !self.check_numbers(&lhs, &rhs) {
                             anyhow::bail!("operands must be numbers: {lhs} {rhs}");
                         }
                         let Outcome::Number(left) = lhs else {
@@ -73,7 +73,7 @@ impl<'de> Evaluator<'de> {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
-                    if self.are_numbers(&lhs, &rhs) {
+                    if self.check_numbers(&lhs, &rhs) {
                         let Outcome::Number(left) = lhs else {
                             unreachable!("checked above");
                         };
@@ -83,7 +83,7 @@ impl<'de> Evaluator<'de> {
                         };
 
                         return Ok(Outcome::Number(left + right));
-                    } else if self.are_strings(&lhs, &rhs) {
+                    } else if self.check_strings(&lhs, &rhs) {
                         let Outcome::String(left) = lhs else {
                             unreachable!("checked above");
                         };
@@ -98,11 +98,12 @@ impl<'de> Evaluator<'de> {
                     }
                 }
 
-                Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual | Op::EqualEqual => {
+                Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
-                    if !self.are_numbers(&lhs, &rhs) {
+                    // TODO: Check strings for == and !=:
+                    if !self.check_numbers(&lhs, &rhs) {
                         anyhow::bail!("operands must be numbers {lhs} {rhs}");
                     }
 
@@ -119,9 +120,45 @@ impl<'de> Evaluator<'de> {
                         Op::Greater => return Ok(Outcome::Boolean(left > right)),
                         Op::LessEqual => return Ok(Outcome::Boolean(left <= right)),
                         Op::Less => return Ok(Outcome::Boolean(left < right)),
-                        Op::EqualEqual => return Ok(Outcome::Boolean(left == right)),
                         _ => unreachable!("checked above"),
                     }
+                }
+
+                Op::EqualEqual | Op::BangEqual => {
+                    let lhs = self.evaluate_statement(&args[0])?;
+                    let rhs = self.evaluate_statement(&args[1])?;
+
+                    if self.check_numbers(&lhs, &rhs) {
+                        let Outcome::Number(left) = lhs else {
+                            unreachable!("checked above");
+                        };
+
+                        let Outcome::Number(right) = rhs else {
+                            unreachable!("checked above");
+                        };
+
+                        if *op == Op::EqualEqual {
+                            return Ok(Outcome::Boolean(left == right));
+                        } else {
+                            return Ok(Outcome::Boolean(left != right));
+                        }
+                    } else if self.check_strings(&lhs, &rhs) {
+                        let Outcome::String(left) = lhs else {
+                            unreachable!("checked above");
+                        };
+
+                        let Outcome::String(right) = rhs else {
+                            unreachable!("checked above");
+                        };
+
+                        if *op == Op::EqualEqual {
+                            return Ok(Outcome::Boolean(left == right));
+                        } else {
+                            return Ok(Outcome::Boolean(left != right));
+                        }
+                    }
+
+                    Ok(Outcome::Boolean(false))
                 }
 
                 Op::Bang => {
@@ -138,7 +175,7 @@ impl<'de> Evaluator<'de> {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
-                    if !self.are_numbers(&lhs, &rhs) {
+                    if !self.check_numbers(&lhs, &rhs) {
                         anyhow::bail!("operands must be numbers: {lhs} {rhs}");
                     }
                     let Outcome::Number(left) = lhs else {
@@ -161,11 +198,12 @@ impl<'de> Evaluator<'de> {
         }
     }
 
-    fn are_numbers(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
+    // TODO: Move outside
+    fn check_numbers(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
         matches!(left, Outcome::Number(_)) && matches!(right, Outcome::Number(_))
     }
 
-    fn are_strings(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
+    fn check_strings(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
         matches!(left, Outcome::String(_)) && matches!(right, Outcome::String(_))
     }
 }
