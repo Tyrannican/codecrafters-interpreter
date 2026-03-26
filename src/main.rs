@@ -19,6 +19,7 @@ enum LoxCommand {
     Tokenize { filename: PathBuf },
     Parse { filename: PathBuf },
     Evaluate { filename: PathBuf },
+    Run { filename: PathBuf },
 }
 
 fn main() -> Result<()> {
@@ -93,6 +94,28 @@ fn main() -> Result<()> {
                 Err(e) => {
                     eprintln!("{}", e.to_string());
                     std::process::exit(70);
+                }
+            }
+        }
+
+        LoxCommand::Run { filename } => {
+            let file_contents = std::fs::read_to_string(&filename)
+                .with_context(|| format!("reading input file {}", filename.display()))?;
+            let mut parser = LoxParser::new(&file_contents);
+            let ast = match parser.parse() {
+                Ok(ast) => ast,
+                Err(e) => {
+                    eprintln!("{}", e.to_string());
+                    std::process::exit(65);
+                }
+            };
+
+            let mut evaluator = Evaluator::new(&ast);
+            match evaluator.evaluate() {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("{}", e.to_string());
+                    std::process::exit(65);
                 }
             }
         }

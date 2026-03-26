@@ -192,6 +192,15 @@ impl<'de> Evaluator<'de> {
                         return Ok(Outcome::Number(left / right));
                     }
                 }
+
+                Op::Print => {
+                    let lhs = self.evaluate_statement(&args[0])?;
+                    if lhs == Outcome::Nil {
+                        anyhow::bail!("invalid print statement");
+                    }
+
+                    return Ok(lhs);
+                }
                 _ => todo!("implement operation: {op}"),
             },
             other => todo!("need to implement {other}"),
