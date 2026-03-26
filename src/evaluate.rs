@@ -16,18 +16,17 @@ impl<'de> Evaluator<'de> {
         Self { ast }
     }
 
-    pub fn evaluate(&mut self) -> Result<()> {
+    pub fn evaluate(&mut self) -> Result<Vec<Outcome<'de>>> {
         let Ast::Program(statements) = self.ast else {
             anyhow::bail!("parse error - expected program");
         };
 
+        let mut outputs = Vec::new();
         for statement in statements {
-            let res = self.evaluate_statement(statement)?;
-
-            println!("{res}");
+            outputs.push(self.evaluate_statement(statement)?);
         }
 
-        Ok(())
+        Ok(outputs)
     }
 
     fn evaluate_statement(&mut self, ast: &'de Ast<'de>) -> Result<Outcome<'de>> {
@@ -47,7 +46,7 @@ impl<'de> Evaluator<'de> {
                 Op::Minus => {
                     if args.len() == 1 {
                         let Outcome::Number(n) = self.evaluate_statement(&args[0])? else {
-                            anyhow::bail!("Operator must be a number");
+                            return Ok(Outcome::Error((format!("Operator must be a number"), 70)));
                         };
 
                         return Ok(Outcome::Number(-n));
@@ -55,7 +54,10 @@ impl<'de> Evaluator<'de> {
                         let lhs = self.evaluate_statement(&args[0])?;
                         let rhs = self.evaluate_statement(&args[1])?;
                         if !self.check_numbers(&lhs, &rhs) {
-                            anyhow::bail!("operands must be numbers: {lhs} {rhs}");
+                            return Ok(Outcome::Error((
+                                format!("operands must be numbers: {lhs} {rhs}"),
+                                70,
+                            )));
                         }
                         let Outcome::Number(left) = lhs else {
                             unreachable!("checked above");
@@ -94,7 +96,10 @@ impl<'de> Evaluator<'de> {
 
                         return Ok(Outcome::String(Cow::Owned(format!("{left}{right}"))));
                     } else {
-                        anyhow::bail!("operands must be either numbers or strings {lhs} {rhs}");
+                        return Ok(Outcome::Error((
+                            format!("operands must be either numbers or strings {lhs} {rhs}"),
+                            70,
+                        )));
                     }
                 }
 
@@ -104,7 +109,10 @@ impl<'de> Evaluator<'de> {
 
                     // TODO: Check strings for == and !=:
                     if !self.check_numbers(&lhs, &rhs) {
-                        anyhow::bail!("operands must be numbers {lhs} {rhs}");
+                        return Ok(Outcome::Error((
+                            format!("operands must be numbers {lhs} {rhs}"),
+                            70,
+                        )));
                     }
 
                     let Outcome::Number(left) = lhs else {
@@ -156,6 +164,20 @@ impl<'de> Evaluator<'de> {
                         } else {
                             return Ok(Outcome::Boolean(left != right));
                         }
+                    } else if self.check_booleans(&lhs, &rhs) {
+                        let Outcome::Boolean(left) = lhs else {
+                            unreachable!("checked above");
+                        };
+
+                        let Outcome::Boolean(right) = rhs else {
+                            unreachable!("checked above");
+                        };
+
+                        if *op == Op::EqualEqual {
+                            return Ok(Outcome::Boolean(left == right));
+                        } else {
+                            return Ok(Outcome::Boolean(left != right));
+                        }
                     }
 
                     Ok(Outcome::Boolean(false))
@@ -166,6 +188,7 @@ impl<'de> Evaluator<'de> {
                         Outcome::String(_) | Outcome::Number(_) => Outcome::Boolean(false),
                         Outcome::Nil => Outcome::Boolean(true),
                         Outcome::Boolean(b) => Outcome::Boolean(!b),
+                        _ => anyhow::bail!("invalid"),
                     };
 
                     return Ok(outcome);
@@ -176,7 +199,10 @@ impl<'de> Evaluator<'de> {
                     let rhs = self.evaluate_statement(&args[1])?;
 
                     if !self.check_numbers(&lhs, &rhs) {
-                        anyhow::bail!("operands must be numbers: {lhs} {rhs}");
+                        return Ok(Outcome::Error((
+                            format!("operands must be numbers: {lhs} {rhs}"),
+                            70,
+                        )));
                     }
                     let Outcome::Number(left) = lhs else {
                         unreachable!("checked above");
@@ -196,10 +222,10 @@ impl<'de> Evaluator<'de> {
                 Op::Print => {
                     let lhs = self.evaluate_statement(&args[0])?;
                     if lhs == Outcome::Nil {
-                        anyhow::bail!("invalid print statement");
+                        return Ok(Outcome::Error(("invalid print expression".to_string(), 70)));
                     }
 
-                    return Ok(lhs);
+                    return Ok(Outcome::Print(Box::new(lhs)));
                 }
                 _ => todo!("implement operation: {op}"),
             },
@@ -215,13 +241,19 @@ impl<'de> Evaluator<'de> {
     fn check_strings(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
         matches!(left, Outcome::String(_)) && matches!(right, Outcome::String(_))
     }
+
+    fn check_booleans(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
+        matches!(left, Outcome::Boolean(_)) && matches!(right, Outcome::Boolean(_))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Outcome<'de> {
+pub enum Outcome<'de> {
     String(Cow<'de, str>),
     Number(f64),
     Boolean(bool),
+    Print(Box<Outcome<'de>>),
+    Error((String, i32)),
     Nil,
 }
 
@@ -238,6 +270,8 @@ impl<'de> std::fmt::Display for Outcome<'de> {
             }
             Self::Boolean(b) => write!(f, "{b:?}"),
             Self::Nil => write!(f, "nil"),
+            Self::Print(statement) => write!(f, "{statement}"),
+            Self::Error((msg, code)) => write!(f, "{msg}: {code}"),
         }
     }
 }

@@ -20,8 +20,8 @@ impl<'de> Parser<'de> {
 
     fn parse_program(&mut self) -> Result<Vec<Ast<'de>>, Error> {
         let mut statements = Vec::new();
-        while !self.lexer.is_empty() {
-            statements.push(self.parse_statement(0)?);
+        while self.lexer.peek().is_some() {
+            statements.push(self.parse_statement()?);
         }
 
         Ok(statements)
@@ -80,7 +80,7 @@ impl<'de> Parser<'de> {
                 ..
             }))
         ) {
-            //
+            // No arguments — the `)` will be consumed by the caller.
         } else {
             loop {
                 let arg = self.parse_expression(0)?;
@@ -108,56 +108,70 @@ impl<'de> Parser<'de> {
                 ..
             })),
         ) {
-            statements.push(self.parse_statement(0)?);
+            statements.push(self.parse_statement()?);
         }
         self.lexer.expect(TokenType::RightBrace)?;
 
         Ok(Ast::Block(statements))
     }
 
-    fn parse_statement(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
-        let lhs = match self.lexer.next() {
-            Some(Ok(token)) => token,
-            None => return Ok(Ast::Atom(Atom::Nil)),
-            Some(Err(e)) => return Err(e.into()),
+    /// Optionally consume a trailing semicolon if one is present.
+    fn consume_optional_semicolon(&mut self) {
+        if matches!(
+            self.lexer.peek(),
+            Some(Ok(Token {
+                subtype: TokenType::Semicolon,
+                ..
+            }))
+        ) {
+            self.lexer.next();
+        }
+    }
+
+    // ===========================================================================
+    // Statement parsing
+    // ===========================================================================
+    //
+    // Peek at the next token to determine which kind of statement we have,
+    // then delegate to the appropriate sub-parser.  Semicolons are consumed
+    // here (and only here) after the statement body is parsed.
+
+    fn parse_statement(&mut self) -> Result<Ast<'de>, Error> {
+        let peeked = match self.lexer.peek() {
+            Some(Ok(token)) => token.subtype,
+            Some(Err(_)) => {
+                let err = self
+                    .lexer
+                    .next()
+                    .expect("peeked Some")
+                    .expect_err("peeked Err");
+                return Err(err.into());
+            }
+            None => anyhow::bail!("unexpected end of input"),
         };
 
-        let mut lhs = match lhs.subtype {
-            TokenType::Ident => Ast::Atom(Atom::Ident(lhs.source)),
-            TokenType::Super => Ast::Atom(Atom::Super),
-            TokenType::This => Ast::Atom(Atom::This),
-            TokenType::LeftBrace => {
-                let mut statements = Vec::new();
-                while !matches!(
-                    self.lexer.peek(),
-                    Some(Ok(Token {
-                        subtype: TokenType::RightBrace,
-                        ..
-                    })),
-                ) {
-                    statements.push(self.parse_statement(0)?);
-                }
-                self.lexer.expect(TokenType::RightBrace)?;
+        let ast = match peeked {
+            // Block statement: { ... }
+            TokenType::LeftBrace => self.parse_block()?,
 
-                return Ok(Ast::Block(statements));
-            }
-            TokenType::LeftParen => {
-                let lhs = self.parse_expression(0)?;
-                self.lexer.expect(TokenType::RightParen)?;
-                Ast::Cons(Op::Group, vec![lhs])
-            }
+            // Print / return are prefix-style keyword statements whose
+            // argument is a single expression.
             TokenType::Print | TokenType::Return => {
-                let op = match lhs.subtype {
+                let keyword = self.lexer.next().expect("peeked Some").expect("peeked Ok");
+                let op = match keyword.subtype {
                     TokenType::Print => Op::Print,
                     TokenType::Return => Op::Return,
-                    _ => unreachable!("by the match pattern outside"),
+                    _ => unreachable!("by the match pattern above"),
                 };
 
                 let ((), r_bp) = prefix_binding_power(op);
                 let rhs = self.parse_expression(r_bp)?;
-                return Ok(Ast::Cons(op, vec![rhs]));
+                self.consume_optional_semicolon();
+                Ast::Cons(op, vec![rhs])
             }
+
             TokenType::For => {
+                self.lexer.next(); // consume `for`
                 self.lexer.expect(TokenType::LeftParen)?;
                 let initialiser = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::Semicolon)?;
@@ -167,42 +181,54 @@ impl<'de> Parser<'de> {
                 self.lexer.expect(TokenType::RightParen)?;
                 let block = self.parse_block()?;
 
-                return Ok(Ast::Cons(
-                    Op::For,
-                    vec![initialiser, condition, increment, block],
-                ));
+                Ast::Cons(Op::For, vec![initialiser, condition, increment, block])
             }
+
             TokenType::While => {
+                self.lexer.next(); // consume `while`
                 self.lexer.expect(TokenType::LeftParen)?;
                 let condition = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::RightParen)?;
-
                 let block = self.parse_block()?;
-                return Ok(Ast::Cons(Op::While, vec![condition, block]));
+
+                Ast::Cons(Op::While, vec![condition, block])
             }
-            TokenType::Class => return self.parse_class(),
-            TokenType::Fun => return self.parse_function(),
+
+            TokenType::Class => {
+                self.lexer.next(); // consume `class`
+                self.parse_class()?
+            }
+
+            TokenType::Fun => {
+                self.lexer.next(); // consume `fun`
+                self.parse_function()?
+            }
+
             TokenType::Var => {
+                self.lexer.next(); // consume `var`
                 let token = self.lexer.expect(TokenType::Ident)?;
                 let ident = Ast::Atom(Atom::Ident(token.source));
                 self.lexer.expect(TokenType::Equal)?;
                 let assignment = self.parse_expression(0)?;
-                return Ok(Ast::Cons(Op::Var, vec![ident, assignment]));
+                self.consume_optional_semicolon();
+                Ast::Cons(Op::Var, vec![ident, assignment])
             }
+
             TokenType::If => {
+                self.lexer.next(); // consume `if`
                 self.lexer.expect(TokenType::LeftParen)?;
                 let condition = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::RightParen)?;
-                let block = if !matches!(
+                let block = if matches!(
                     self.lexer.peek(),
                     Some(Ok(Token {
                         subtype: TokenType::LeftBrace,
                         ..
                     }))
                 ) {
-                    self.parse_expression(0)?
-                } else {
                     self.parse_block()?
+                } else {
+                    self.parse_expression(0)?
                 };
                 let mut other = None;
 
@@ -213,185 +239,40 @@ impl<'de> Parser<'de> {
                         ..
                     }))
                 ) {
-                    self.lexer.next();
+                    self.lexer.next(); // consume `else`
                     other = Some(self.parse_block()?);
                 }
 
-                return Ok(Ast::If {
+                Ast::If {
                     condition: Box::new(condition),
                     yes: Box::new(block),
                     no: other.map(Box::new),
-                });
+                }
             }
-            _ => self.parse_top_level_expression(&lhs, 0)?,
+
+            // Everything else is an expression statement.
+            _ => {
+                let expr = self.parse_expression(0)?;
+                self.consume_optional_semicolon();
+                expr
+            }
         };
 
-        loop {
-            let op = self.lexer.peek();
-            if op.map_or(false, |op| op.is_err()) {
-                anyhow::bail!("unexpected eof???");
-            }
-
-            let op = match op.map(|res| res.as_ref().expect("handled above")) {
-                None => break,
-                Some(Token {
-                    subtype: TokenType::LeftParen,
-                    ..
-                }) => Op::Call,
-                Some(Token {
-                    subtype: TokenType::Dot,
-                    ..
-                }) => Op::Field,
-                Some(Token {
-                    subtype: TokenType::Semicolon,
-                    ..
-                }) => break,
-                Some(token) => token.operation()?,
-            };
-
-            if let Some((lbp, ())) = postfix_binding_power(op) {
-                if lbp < min_bp {
-                    break;
-                }
-                self.lexer.next();
-
-                lhs = match op {
-                    Op::Call => Ast::Call {
-                        caller: Box::new(lhs),
-                        arguments: self.parse_function_call()?,
-                    },
-                    _ => Ast::Cons(op, vec![lhs]),
-                };
-                continue;
-            }
-
-            if let Some((lbp, rbp)) = infix_binding_power(op) {
-                if lbp < min_bp {
-                    break;
-                }
-                self.lexer.next();
-
-                let rhs = self.parse_statement(rbp)?;
-                lhs = Ast::Cons(op, vec![lhs, rhs]);
-                continue;
-            }
-
-            break;
-        }
-
-        Ok(lhs)
+        Ok(ast)
     }
 
-    fn parse_top_level_expression(
-        &mut self,
-        token: &Token<'de>,
-        min_bp: u8,
-    ) -> Result<Ast<'de>, Error> {
-        let mut lhs = match token.subtype {
-            TokenType::String => Ast::Atom(Atom::String(token.source)),
-            TokenType::Number(n) => Ast::Atom(Atom::Number(n)),
-            TokenType::True => Ast::Atom(Atom::Bool(true)),
-            TokenType::False => Ast::Atom(Atom::Bool(false)),
-            TokenType::Semicolon | TokenType::Nil => Ast::Atom(Atom::Nil),
-            TokenType::Ident => Ast::Atom(Atom::Ident(token.source)),
-            TokenType::Super => Ast::Atom(Atom::Super),
-            TokenType::This => Ast::Atom(Atom::This),
-            TokenType::LeftParen => {
-                let lhs = self.parse_expression(0)?;
-                self.lexer.expect(TokenType::RightParen)?;
-                Ast::Cons(Op::Group, vec![lhs])
-            }
-            TokenType::Bang | TokenType::Minus => {
-                let op = match token.subtype {
-                    TokenType::Bang => Op::Bang,
-                    TokenType::Minus => Op::Minus,
-                    _ => unreachable!("from the outer match pattern"),
-                };
-
-                let ((), rbp) = prefix_binding_power(op);
-                let rhs = self.parse_expression(rbp)?;
-                Ast::Cons(op, vec![rhs])
-            }
-            _ => anyhow::bail!("expected an expression - unexpected token {token:?}"),
-        };
-
-        loop {
-            let op = self.lexer.peek();
-            if op.map_or(false, |op| op.is_err()) {
-                let next = self
-                    .lexer
-                    .next()
-                    .expect("checked above")
-                    .expect_err("checked again");
-                anyhow::bail!("expected operator - found {next:?}");
-            }
-
-            let op = match op.map(|res| res.as_ref().expect("handled above")) {
-                None => break,
-                Some(Token {
-                    subtype:
-                        TokenType::RightParen
-                        | TokenType::Comma
-                        | TokenType::Semicolon
-                        | TokenType::RightBrace,
-                    ..
-                }) => break,
-                Some(Token {
-                    subtype: TokenType::LeftParen,
-                    ..
-                }) => Op::Call,
-                Some(token) => token.operation()?,
-            };
-
-            if let Some((lbp, ())) = postfix_binding_power(op) {
-                if lbp < min_bp {
-                    break;
-                }
-                self.lexer.next();
-
-                lhs = match op {
-                    Op::Call => Ast::Call {
-                        caller: Box::new(lhs),
-                        arguments: self.parse_function_call()?,
-                    },
-                    _ => Ast::Cons(op, vec![lhs]),
-                };
-
-                continue;
-            }
-
-            if let Some((lbp, rbp)) = infix_binding_power(op) {
-                if lbp < min_bp {
-                    break;
-                }
-
-                self.lexer.next();
-                let rhs = self.parse_expression(rbp)?;
-                lhs = Ast::Cons(op, vec![lhs, rhs]);
-                continue;
-            }
-
-            break;
-        }
-
-        if matches!(
-            self.lexer.peek(),
-            Some(Ok(Token {
-                subtype: TokenType::Semicolon,
-                ..
-            }))
-        ) {
-            self.lexer.next();
-        }
-
-        Ok(lhs)
-    }
+    // ===========================================================================
+    // Expression parsing (Pratt parser)
+    // ===========================================================================
+    //
+    // This is the *only* function that performs binding-power climbing.  It
+    // never consumes semicolons — that is the caller's responsibility.
 
     fn parse_expression(&mut self, min_bp: u8) -> Result<Ast<'de>, Error> {
         let lhs = match self.lexer.next() {
             Some(Ok(token)) => token,
             None => return Ok(Ast::Atom(Atom::Nil)),
-            Some(Err(e)) => anyhow::bail!("expected expression - {}", e.to_string()),
+            Some(Err(e)) => anyhow::bail!("expected expression - {e}"),
         };
 
         let mut lhs = match lhs.subtype {
@@ -399,14 +280,14 @@ impl<'de> Parser<'de> {
             TokenType::Number(n) => Ast::Atom(Atom::Number(n)),
             TokenType::True => Ast::Atom(Atom::Bool(true)),
             TokenType::False => Ast::Atom(Atom::Bool(false)),
-            TokenType::Semicolon | TokenType::Nil => Ast::Atom(Atom::Nil),
+            TokenType::Nil => Ast::Atom(Atom::Nil),
             TokenType::Ident => Ast::Atom(Atom::Ident(lhs.source)),
             TokenType::Super => Ast::Atom(Atom::Super),
             TokenType::This => Ast::Atom(Atom::This),
             TokenType::LeftParen => {
-                let lhs = self.parse_expression(0)?;
+                let inner = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::RightParen)?;
-                Ast::Cons(Op::Group, vec![lhs])
+                Ast::Cons(Op::Group, vec![inner])
             }
             TokenType::Bang | TokenType::Minus => {
                 let op = match lhs.subtype {
@@ -423,31 +304,25 @@ impl<'de> Parser<'de> {
         };
 
         loop {
-            let op = self.lexer.peek();
-            if op.map_or(false, |op| op.is_err()) {
-                let next = self
-                    .lexer
-                    .next()
-                    .expect("checked above")
-                    .expect_err("checked again");
-                anyhow::bail!("expected operator - found {next:?}");
-            }
-
-            let op = match op.map(|res| res.as_ref().expect("handled above")) {
+            let op = match self.lexer.peek() {
+                Some(Err(_)) => {
+                    let err = self
+                        .lexer
+                        .next()
+                        .expect("peeked Some")
+                        .expect_err("peeked Err");
+                    anyhow::bail!("expected operator - found {err:?}");
+                }
                 None => break,
-                Some(Token {
-                    subtype:
-                        TokenType::RightParen
-                        | TokenType::Comma
-                        | TokenType::Semicolon
-                        | TokenType::RightBrace,
-                    ..
-                }) => break,
-                Some(Token {
-                    subtype: TokenType::LeftParen,
-                    ..
-                }) => Op::Call,
-                Some(token) => token.operation()?,
+                Some(Ok(token)) => match token.subtype {
+                    // These tokens end an expression — let the caller handle them.
+                    TokenType::RightParen
+                    | TokenType::Comma
+                    | TokenType::Semicolon
+                    | TokenType::RightBrace => break,
+                    TokenType::LeftParen => Op::Call,
+                    _ => token.operation()?,
+                },
             };
 
             if let Some((lbp, ())) = postfix_binding_power(op) {
@@ -463,7 +338,6 @@ impl<'de> Parser<'de> {
                     },
                     _ => Ast::Cons(op, vec![lhs]),
                 };
-
                 continue;
             }
 
@@ -471,24 +345,14 @@ impl<'de> Parser<'de> {
                 if lbp < min_bp {
                     break;
                 }
-
                 self.lexer.next();
+
                 let rhs = self.parse_expression(rbp)?;
                 lhs = Ast::Cons(op, vec![lhs, rhs]);
                 continue;
             }
 
             break;
-        }
-
-        if matches!(
-            self.lexer.peek(),
-            Some(Ok(Token {
-                subtype: TokenType::Semicolon,
-                ..
-            }))
-        ) {
-            self.lexer.next();
         }
 
         Ok(lhs)
@@ -498,23 +362,23 @@ impl<'de> Parser<'de> {
 fn prefix_binding_power(op: Op) -> ((), u8) {
     match op {
         Op::Print | Op::Return => ((), 1),
-        Op::Minus | Op::Bang => ((), 11),
+        Op::Minus | Op::Bang => ((), 15),
         _ => panic!("bad op: {op:?}"),
     }
 }
 
 fn infix_binding_power(op: Op) -> Option<(u8, u8)> {
+    // Precedence (low → high):
+    //   assignment < or < and < equality < comparison < addition < multiplication
     let res = match op {
         Op::Assign => (2, 1),
-        Op::Plus | Op::Minus => (3, 4),
-        Op::Star | Op::Slash => (7, 8),
-        Op::LessEqual
-        | Op::Less
-        | Op::GreaterEqual
-        | Op::Greater
-        | Op::BangEqual
-        | Op::EqualEqual => (9, 10),
-        Op::Field => (16, 15),
+        Op::Or => (3, 4),
+        Op::And => (5, 6),
+        Op::BangEqual | Op::EqualEqual => (7, 8),
+        Op::LessEqual | Op::Less | Op::GreaterEqual | Op::Greater => (9, 10),
+        Op::Plus | Op::Minus => (11, 12),
+        Op::Star | Op::Slash => (13, 14),
+        Op::Field => (20, 19),
         _ => return None,
     };
 
@@ -523,7 +387,7 @@ fn infix_binding_power(op: Op) -> Option<(u8, u8)> {
 
 fn postfix_binding_power(op: Op) -> Option<(u8, ())> {
     match op {
-        Op::Call => Some((13, ())),
+        Op::Call => Some((17, ())),
         _ => None,
     }
 }

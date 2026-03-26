@@ -2,7 +2,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use codecrafters_interpreter::{
-    evaluate::Evaluator,
+    evaluate::{Evaluator, Outcome},
     lex::{LexError, Lexer},
     parse::Parser as LoxParser,
 };
@@ -89,11 +89,13 @@ fn main() -> Result<()> {
             };
 
             let mut evaluator = Evaluator::new(&ast);
-            match evaluator.evaluate() {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
-                    std::process::exit(70);
+            for output in evaluator.evaluate()? {
+                match output {
+                    Outcome::Error((msg, code)) => {
+                        eprintln!("{msg}");
+                        std::process::exit(code);
+                    }
+                    _ => println!("{output}"),
                 }
             }
         }
@@ -111,11 +113,18 @@ fn main() -> Result<()> {
             };
 
             let mut evaluator = Evaluator::new(&ast);
-            match evaluator.evaluate() {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
-                    std::process::exit(65);
+            for output in evaluator.evaluate()? {
+                match output {
+                    Outcome::Print(statement) => {
+                        if let Outcome::Error((_, code)) = *statement {
+                            std::process::exit(code);
+                        }
+                        println!("{statement}");
+                    }
+                    Outcome::Error((msg, code)) => {
+                        std::process::exit(code);
+                    }
+                    _ => {}
                 }
             }
         }

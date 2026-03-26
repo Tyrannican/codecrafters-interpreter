@@ -53,8 +53,8 @@ impl<'de> Lexer<'de> {
         self.peeked.as_ref()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.rest.is_empty()
+    pub fn is_empty(&mut self) -> bool {
+        self.peeked.is_none() && self.rest.trim().is_empty()
     }
 
     pub fn expect(&mut self, token_type: TokenType) -> Result<Token<'de>, anyhow::Error> {
