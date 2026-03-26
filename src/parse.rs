@@ -208,10 +208,17 @@ impl<'de> Parser<'de> {
                 self.lexer.next(); // consume `var`
                 let token = self.lexer.expect(TokenType::Ident)?;
                 let ident = Ast::Atom(Atom::Ident(token.source));
-                self.lexer.expect(TokenType::Equal)?;
-                let assignment = self.parse_expression(0)?;
-                self.consume_optional_semicolon();
-                Ast::Cons(Op::Var, vec![ident, assignment])
+                match self.lexer.expect(TokenType::Equal) {
+                    Ok(_) => {
+                        let assignment = self.parse_expression(0)?;
+                        self.consume_optional_semicolon();
+                        Ast::Cons(Op::Var, vec![ident, assignment])
+                    }
+                    Err(_) => {
+                        self.consume_optional_semicolon();
+                        Ast::Cons(Op::Var, vec![ident, Ast::Atom(Atom::Nil)])
+                    }
+                }
             }
 
             TokenType::If => {
@@ -414,6 +421,63 @@ pub enum Ast<'de> {
 }
 
 impl<'de> std::fmt::Display for Ast<'de> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Atom(a) => write!(f, "{a}"),
+            Self::Cons(op, rest) => {
+                write!(f, "({op}")?;
+                for r in rest {
+                    write!(f, " {r}")?;
+                }
+
+                write!(f, ")")
+            }
+            Self::Function {
+                name,
+                parameters,
+                block,
+            } => {
+                write!(f, "(fun {name}")?;
+                for param in parameters {
+                    write!(f, " {param}")?;
+                }
+
+                write!(f, "{block})")
+            }
+            Self::Call { caller, arguments } => {
+                write!(f, "({caller}")?;
+                for arg in arguments {
+                    write!(f, " {arg}")?;
+                }
+
+                write!(f, ")")
+            }
+            Self::Program(tree) => {
+                for entry in tree.iter() {
+                    write!(f, "{entry}")?;
+                }
+
+                Ok(())
+            }
+            Self::If { condition, yes, no } => {
+                write!(f, "(if {condition} {yes}")?;
+                if let Some(no) = no {
+                    write!(f, " {no}")?;
+                }
+                write!(f, ")")
+            }
+            Self::Block(statements) => {
+                write!(f, "(block")?;
+                for s in statements {
+                    write!(f, " {s}")?;
+                }
+                write!(f, ")")
+            }
+        }
+    }
+}
+
+impl<'de> std::fmt::Debug for Ast<'de> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Atom(a) => write!(f, "{a}"),

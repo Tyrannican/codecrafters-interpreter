@@ -116,12 +116,14 @@ fn main() -> Result<()> {
             for output in evaluator.evaluate()? {
                 match output {
                     Outcome::Print(statement) => {
-                        if let Outcome::Error((_, code)) = *statement {
+                        if let Outcome::Error((msg, code)) = *statement {
+                            eprintln!("{msg}");
                             std::process::exit(code);
                         }
                         println!("{statement}");
                     }
                     Outcome::Error((msg, code)) => {
+                        eprintln!("{msg}");
                         std::process::exit(code);
                     }
                     _ => {}
