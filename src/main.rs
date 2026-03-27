@@ -2,7 +2,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use codecrafters_interpreter::{
-    evaluate::{Eval, Evaluator},
+    evaluate::{Eval, Program},
     lex::{LexError, Lexer},
     parse::Parser as LoxParser,
 };
@@ -88,8 +88,8 @@ fn main() -> Result<()> {
                 }
             };
 
-            let mut evaluator = Evaluator::new(&ast);
-            for output in evaluator.evaluate()? {
+            let mut program = Program::new(&ast);
+            for output in program.evaluate()? {
                 match output {
                     Eval::Error((msg, code)) => {
                         eprintln!("{msg}");
@@ -112,8 +112,8 @@ fn main() -> Result<()> {
                 }
             };
 
-            let mut evaluator = Evaluator::new(&ast);
-            for output in evaluator.evaluate()? {
+            let mut program = Program::new(&ast);
+            for output in program.evaluate()? {
                 match output {
                     Eval::Print(statement) => {
                         if let Eval::Error((msg, code)) = *statement {
