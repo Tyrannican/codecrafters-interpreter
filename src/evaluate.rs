@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     lex::{Atom, Op},
@@ -7,9 +7,27 @@ use crate::{
 
 use anyhow::Result;
 
+fn evaluate_statement<'de>(ast: &'de Ast<'de>) -> Result<Eval<'de>> {
+    match ast {
+        Ast::Atom(atom) => return Ok(evaluate_atom(atom)),
+        _ => todo!(),
+    }
+}
+
+fn evaluate_atom<'de>(atom: &'de Atom) -> Eval<'de> {
+    match atom {
+        Atom::String(s) => Eval::String(Cow::Borrowed(s.trim_matches('"'))),
+        Atom::Number(n) => Eval::Number(*n),
+        Atom::Bool(b) => Eval::Boolean(*b),
+        Atom::Ident(i) => Eval::Ident(Cow::Borrowed(*i)),
+        Atom::Nil => Eval::Nil,
+        _ => unimplemented!("not yet"),
+    }
+}
+
 pub struct Evaluator<'de> {
     ast: &'de Ast<'de>,
-    assignments: HashMap<Cow<'de, str>, Outcome<'de>>,
+    assignments: HashMap<Cow<'de, str>, Eval<'de>>,
 }
 
 impl<'de> Evaluator<'de> {
@@ -20,7 +38,7 @@ impl<'de> Evaluator<'de> {
         }
     }
 
-    pub fn evaluate(&mut self) -> Result<Vec<Outcome<'de>>> {
+    pub fn evaluate(&mut self) -> Result<Vec<Eval<'de>>> {
         let Ast::Program(statements) = self.ast else {
             anyhow::bail!("parse error - expected program");
         };
@@ -33,7 +51,7 @@ impl<'de> Evaluator<'de> {
         Ok(outputs)
     }
 
-    fn lookup_assignment(&self, ident: impl AsRef<str>) -> Option<Outcome<'de>> {
+    fn lookup_assignment(&self, ident: impl AsRef<str>) -> Option<Eval<'de>> {
         if let Some(var) = self.assignments.get(ident.as_ref()) {
             return Some(var.clone());
         }
@@ -41,14 +59,14 @@ impl<'de> Evaluator<'de> {
         None
     }
 
-    fn evaluate_statement(&mut self, ast: &'de Ast<'de>) -> Result<Outcome<'de>> {
+    fn evaluate_statement(&mut self, ast: &'de Ast<'de>) -> Result<Eval<'de>> {
         let outcome = match ast {
             Ast::Atom(atom) => match atom {
-                Atom::String(s) => Outcome::String(Cow::Borrowed(s.trim_matches('"'))),
-                Atom::Number(n) => Outcome::Number(*n),
-                Atom::Bool(b) => Outcome::Boolean(*b),
-                Atom::Ident(i) => Outcome::Ident(Cow::Borrowed(*i)),
-                Atom::Nil => Outcome::Nil,
+                Atom::String(s) => Eval::String(Cow::Borrowed(s.trim_matches('"'))),
+                Atom::Number(n) => Eval::Number(*n),
+                Atom::Bool(b) => Eval::Boolean(*b),
+                Atom::Ident(i) => Eval::Ident(Cow::Borrowed(*i)),
+                Atom::Nil => Eval::Nil,
                 _ => unimplemented!("not yet"),
             },
             Ast::Cons(op, args) => match op {
@@ -61,19 +79,16 @@ impl<'de> Evaluator<'de> {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
-                    let Outcome::Ident(var) = lhs else {
-                        return Ok(Outcome::create_error(
-                            "can only assign to an identifier",
-                            70,
-                        ));
+                    let Eval::Ident(var) = lhs else {
+                        return Ok(Eval::create_error("can only assign to an identifier", 70));
                     };
 
                     let rhs = match rhs {
-                        Outcome::Ident(i) => {
+                        Eval::Ident(i) => {
                             if let Some(var) = self.lookup_assignment(&i) {
                                 var
                             } else {
-                                return Ok(Outcome::create_error(
+                                return Ok(Eval::create_error(
                                     format!("undeclared variable: {var}"),
                                     70,
                                 ));
@@ -86,7 +101,7 @@ impl<'de> Evaluator<'de> {
                         *assignment = rhs.clone();
                         rhs
                     } else {
-                        Outcome::create_error(format!("undeclared variable: {var}"), 70)
+                        Eval::create_error(format!("undeclared variable: {var}"), 70)
                     }
                 }
 
@@ -94,19 +109,19 @@ impl<'de> Evaluator<'de> {
                     let lhs = self.evaluate_statement(&args[0])?;
                     let rhs = self.evaluate_statement(&args[1])?;
 
-                    let Outcome::Ident(var) = lhs else {
-                        return Ok(Outcome::Error((
+                    let Eval::Ident(var) = lhs else {
+                        return Ok(Eval::Error((
                             format!("assignment must be an identifier: {lhs}"),
                             70,
                         )));
                     };
 
                     let rhs = match rhs {
-                        Outcome::Ident(i) => {
+                        Eval::Ident(i) => {
                             if let Some(var) = self.lookup_assignment(&i) {
                                 var
                             } else {
-                                return Ok(Outcome::create_error(
+                                return Ok(Eval::create_error(
                                     format!("undeclared variable: {var}"),
                                     70,
                                 ));
@@ -116,34 +131,34 @@ impl<'de> Evaluator<'de> {
                     };
 
                     self.assignments.insert(var, rhs);
-                    Outcome::Nil
+                    Eval::Nil
                 }
 
                 Op::Minus => {
                     if args.len() == 1 {
-                        let Outcome::Number(n) = self.evaluate_statement(&args[0])? else {
-                            return Ok(Outcome::Error((format!("Operator must be a number"), 70)));
+                        let Eval::Number(n) = self.evaluate_statement(&args[0])? else {
+                            return Ok(Eval::Error((format!("Operator must be a number"), 70)));
                         };
 
-                        return Ok(Outcome::Number(-n));
+                        return Ok(Eval::Number(-n));
                     } else {
                         let lhs = self.evaluate_statement(&args[0])?;
                         let rhs = self.evaluate_statement(&args[1])?;
                         if !self.check_numbers(&lhs, &rhs) {
-                            return Ok(Outcome::Error((
+                            return Ok(Eval::Error((
                                 format!("operands must be numbers: {lhs} {rhs}"),
                                 70,
                             )));
                         }
-                        let Outcome::Number(left) = lhs else {
+                        let Eval::Number(left) = lhs else {
                             unreachable!("checked above");
                         };
 
-                        let Outcome::Number(right) = rhs else {
+                        let Eval::Number(right) = rhs else {
                             unreachable!("checked above");
                         };
 
-                        Outcome::Number(left - right)
+                        Eval::Number(left - right)
                     }
                 }
 
@@ -152,11 +167,11 @@ impl<'de> Evaluator<'de> {
                     let rhs = self.evaluate_statement(&args[1])?;
 
                     let lhs = match lhs {
-                        Outcome::Ident(i) => {
+                        Eval::Ident(i) => {
                             if let Some(var) = self.assignments.get(&i) {
                                 var.clone()
                             } else {
-                                return Ok(Outcome::create_error(
+                                return Ok(Eval::create_error(
                                     format!("undeclared variable: {i}"),
                                     70,
                                 ));
@@ -166,11 +181,11 @@ impl<'de> Evaluator<'de> {
                     };
 
                     let rhs = match rhs {
-                        Outcome::Ident(i) => {
+                        Eval::Ident(i) => {
                             if let Some(var) = self.assignments.get(&i) {
                                 var.clone()
                             } else {
-                                return Ok(Outcome::create_error(
+                                return Ok(Eval::create_error(
                                     format!("undeclared variable: {i}"),
                                     70,
                                 ));
@@ -180,27 +195,27 @@ impl<'de> Evaluator<'de> {
                     };
 
                     if self.check_numbers(&lhs, &rhs) {
-                        let Outcome::Number(left) = lhs else {
+                        let Eval::Number(left) = lhs else {
                             unreachable!("checked above");
                         };
 
-                        let Outcome::Number(right) = rhs else {
+                        let Eval::Number(right) = rhs else {
                             unreachable!("checked above");
                         };
 
-                        return Ok(Outcome::Number(left + right));
+                        return Ok(Eval::Number(left + right));
                     } else if self.check_strings(&lhs, &rhs) {
-                        let Outcome::String(left) = lhs else {
+                        let Eval::String(left) = lhs else {
                             unreachable!("checked above");
                         };
 
-                        let Outcome::String(right) = rhs else {
+                        let Eval::String(right) = rhs else {
                             unreachable!("checked above");
                         };
 
-                        Outcome::String(Cow::Owned(format!("{left}{right}")))
+                        Eval::String(Cow::Owned(format!("{left}{right}")))
                     } else {
-                        Outcome::Error((
+                        Eval::Error((
                             format!(
                                 "+ error: operands must be either numbers or strings {lhs} {rhs}"
                             ),
@@ -214,25 +229,25 @@ impl<'de> Evaluator<'de> {
                     let rhs = self.evaluate_statement(&args[1])?;
 
                     if !self.check_numbers(&lhs, &rhs) {
-                        return Ok(Outcome::Error((
+                        return Ok(Eval::Error((
                             format!("operands must be numbers {lhs} {rhs}"),
                             70,
                         )));
                     }
 
-                    let Outcome::Number(left) = lhs else {
+                    let Eval::Number(left) = lhs else {
                         unreachable!("checked above");
                     };
 
-                    let Outcome::Number(right) = rhs else {
+                    let Eval::Number(right) = rhs else {
                         unreachable!("checked above");
                     };
 
                     match op {
-                        Op::GreaterEqual => Outcome::Boolean(left >= right),
-                        Op::Greater => Outcome::Boolean(left > right),
-                        Op::LessEqual => Outcome::Boolean(left <= right),
-                        Op::Less => Outcome::Boolean(left < right),
+                        Op::GreaterEqual => Eval::Boolean(left >= right),
+                        Op::Greater => Eval::Boolean(left > right),
+                        Op::LessEqual => Eval::Boolean(left <= right),
+                        Op::Less => Eval::Boolean(left < right),
                         _ => unreachable!("checked above"),
                     }
                 }
@@ -242,57 +257,57 @@ impl<'de> Evaluator<'de> {
                     let rhs = self.evaluate_statement(&args[1])?;
 
                     if self.check_numbers(&lhs, &rhs) {
-                        let Outcome::Number(left) = lhs else {
+                        let Eval::Number(left) = lhs else {
                             unreachable!("checked above");
                         };
 
-                        let Outcome::Number(right) = rhs else {
+                        let Eval::Number(right) = rhs else {
                             unreachable!("checked above");
                         };
 
                         if *op == Op::EqualEqual {
-                            Outcome::Boolean(left == right)
+                            Eval::Boolean(left == right)
                         } else {
-                            Outcome::Boolean(left != right)
+                            Eval::Boolean(left != right)
                         }
                     } else if self.check_strings(&lhs, &rhs) {
-                        let Outcome::String(left) = lhs else {
+                        let Eval::String(left) = lhs else {
                             unreachable!("checked above");
                         };
 
-                        let Outcome::String(right) = rhs else {
+                        let Eval::String(right) = rhs else {
                             unreachable!("checked above");
                         };
 
                         if *op == Op::EqualEqual {
-                            Outcome::Boolean(left == right)
+                            Eval::Boolean(left == right)
                         } else {
-                            Outcome::Boolean(left != right)
+                            Eval::Boolean(left != right)
                         }
                     } else if self.check_booleans(&lhs, &rhs) {
-                        let Outcome::Boolean(left) = lhs else {
+                        let Eval::Boolean(left) = lhs else {
                             unreachable!("checked above");
                         };
 
-                        let Outcome::Boolean(right) = rhs else {
+                        let Eval::Boolean(right) = rhs else {
                             unreachable!("checked above");
                         };
 
                         if *op == Op::EqualEqual {
-                            Outcome::Boolean(left == right)
+                            Eval::Boolean(left == right)
                         } else {
-                            Outcome::Boolean(left != right)
+                            Eval::Boolean(left != right)
                         }
                     } else {
-                        Outcome::Boolean(false)
+                        Eval::Boolean(false)
                     }
                 }
 
                 Op::Bang => match self.evaluate_statement(&args[0])? {
-                    Outcome::String(_) | Outcome::Number(_) => Outcome::Boolean(false),
-                    Outcome::Nil => Outcome::Boolean(true),
-                    Outcome::Boolean(b) => Outcome::Boolean(!b),
-                    _ => anyhow::bail!("invalid"),
+                    Eval::String(_) | Eval::Number(_) => Eval::Boolean(false),
+                    Eval::Nil => Eval::Boolean(true),
+                    Eval::Boolean(b) => Eval::Boolean(!b),
+                    other => Eval::create_error(format!("invalid unary: {other}"), 70),
                 },
                 Op::Star | Op::Slash => {
                     assert!(args.len() > 1);
@@ -300,11 +315,11 @@ impl<'de> Evaluator<'de> {
                     let rhs = self.evaluate_statement(&args[1])?;
 
                     let lhs = match lhs {
-                        Outcome::Ident(i) => {
+                        Eval::Ident(i) => {
                             if let Some(var) = self.lookup_assignment(&i) {
                                 var
                             } else {
-                                return Ok(Outcome::create_error(
+                                return Ok(Eval::create_error(
                                     format!("undeclared variable: {i}"),
                                     70,
                                 ));
@@ -314,41 +329,41 @@ impl<'de> Evaluator<'de> {
                     };
 
                     if !self.check_numbers(&lhs, &rhs) {
-                        return Ok(Outcome::Error((
+                        return Ok(Eval::Error((
                             format!("operands must be numbers: {lhs} {rhs}"),
                             70,
                         )));
                     }
-                    let Outcome::Number(left) = lhs else {
+                    let Eval::Number(left) = lhs else {
                         unreachable!("checked above");
                     };
 
-                    let Outcome::Number(right) = rhs else {
+                    let Eval::Number(right) = rhs else {
                         unreachable!("checked above");
                     };
 
                     if *op == Op::Star {
-                        Outcome::Number(left * right)
+                        Eval::Number(left * right)
                     } else {
-                        Outcome::Number(left / right)
+                        Eval::Number(left / right)
                     }
                 }
 
                 Op::Print => {
                     let lhs = self.evaluate_statement(&args[0])?;
                     eprintln!("Op: {op} Args: {args:?} LHS: {lhs}");
-                    if lhs == Outcome::Nil {
-                        Outcome::Error(("invalid print expression".to_string(), 70))
+                    if lhs == Eval::Nil {
+                        Eval::Error(("invalid print expression".to_string(), 70))
                     } else {
                         match lhs {
-                            Outcome::Ident(var) => {
+                            Eval::Ident(var) => {
                                 if let Some(assignment) = self.assignments.get(&var) {
-                                    Outcome::Print(Box::new(assignment.clone()))
+                                    Eval::Print(Box::new(assignment.clone()))
                                 } else {
-                                    Outcome::Error((format!("undefined variable: {var}"), 70))
+                                    Eval::Error((format!("undefined variable: {var}"), 70))
                                 }
                             }
-                            _ => Outcome::Print(Box::new(lhs)),
+                            _ => Eval::Print(Box::new(lhs)),
                         }
                         // Outcome::Print(Box::new(lhs))
                     }
@@ -362,37 +377,37 @@ impl<'de> Evaluator<'de> {
     }
 
     // TODO: Move outside
-    fn check_numbers(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
-        matches!(left, Outcome::Number(_)) && matches!(right, Outcome::Number(_))
+    fn check_numbers(&self, left: &Eval<'de>, right: &Eval<'de>) -> bool {
+        matches!(left, Eval::Number(_)) && matches!(right, Eval::Number(_))
     }
 
-    fn check_strings(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
-        matches!(left, Outcome::String(_)) && matches!(right, Outcome::String(_))
+    fn check_strings(&self, left: &Eval<'de>, right: &Eval<'de>) -> bool {
+        matches!(left, Eval::String(_)) && matches!(right, Eval::String(_))
     }
 
-    fn check_booleans(&self, left: &Outcome<'de>, right: &Outcome<'de>) -> bool {
-        matches!(left, Outcome::Boolean(_)) && matches!(right, Outcome::Boolean(_))
+    fn check_booleans(&self, left: &Eval<'de>, right: &Eval<'de>) -> bool {
+        matches!(left, Eval::Boolean(_)) && matches!(right, Eval::Boolean(_))
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Outcome<'de> {
+pub enum Eval<'de> {
     String(Cow<'de, str>),
     Number(f64),
     Boolean(bool),
     Ident(Cow<'de, str>),
-    Print(Box<Outcome<'de>>),
+    Print(Box<Eval<'de>>),
     Error((String, i32)),
     Nil,
 }
 
-impl<'de> Outcome<'de> {
+impl<'de> Eval<'de> {
     pub fn create_error(msg: impl AsRef<str>, code: i32) -> Self {
         Self::Error((msg.as_ref().to_string(), code))
     }
 }
 
-impl<'de> std::fmt::Display for Outcome<'de> {
+impl<'de> std::fmt::Display for Eval<'de> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::String(s) | Self::Ident(s) => write!(f, "{}", s.trim_matches('"')),
@@ -408,5 +423,48 @@ impl<'de> std::fmt::Display for Outcome<'de> {
             Self::Print(statement) => write!(f, "{statement}"),
             Self::Error((msg, code)) => write!(f, "{msg}: {code}"),
         }
+    }
+}
+
+pub struct Scope<'de> {
+    assignments: HashMap<Cow<'de, str>, Eval<'de>>,
+    parent: Option<Rc<RefCell<Scope<'de>>>>,
+}
+
+impl<'de> Scope<'de> {
+    pub fn new() -> Self {
+        Self {
+            assignments: HashMap::default(),
+            parent: None,
+        }
+    }
+
+    pub fn define(&mut self, name: Cow<'de, str>, value: Eval<'de>) {
+        self.assignments.insert(name, value);
+    }
+
+    pub fn assign(&mut self, name: Cow<'de, str>, value: Eval<'de>) -> bool {
+        if self.assignments.contains_key(&name) {
+            self.assignments.insert(name, value);
+            return true;
+        }
+
+        if let Some(parent) = &self.parent {
+            return parent.borrow_mut().assign(name, value);
+        }
+
+        false
+    }
+
+    pub fn get(&self, name: Cow<'de, str>) -> Option<Eval<'de>> {
+        if let Some(value) = self.assignments.get(&name) {
+            return Some(value.clone());
+        }
+
+        if let Some(parent) = &self.parent {
+            return parent.borrow().get(name);
+        }
+
+        None
     }
 }
