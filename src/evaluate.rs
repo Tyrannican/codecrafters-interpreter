@@ -25,7 +25,6 @@ impl<'de> Program<'de> {
             anyhow::bail!("parse error - expected program");
         };
 
-        // TODO: Flatten blocks
         let mut outputs = Vec::new();
         for statement in statements {
             match self.evaluate_statement(statement)? {
