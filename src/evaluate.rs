@@ -27,31 +27,53 @@ impl<'de> Program<'de> {
 
         let mut outputs = Vec::new();
         for statement in statements {
-            match self.evaluate_statement(statement)? {
-                Eval::Block(blk) => outputs.extend_from_slice(&blk),
-                other => outputs.push(other),
+            match self.evaluate_statement(statement) {
+                Ok(eval) => match eval {
+                    Eval::Block(blk) => outputs.extend_from_slice(&blk),
+                    other => outputs.push(other),
+                },
+                Err(e) => {
+                    if let Some(eval) = e.downcast_ref::<Eval>() {
+                        outputs.push(eval.clone());
+                    } else {
+                        anyhow::bail!("unknown error occurred: {}", e.to_string());
+                    }
+                }
             }
         }
 
         Ok(outputs)
     }
 
+    fn evaluate_block_or_statement(&mut self, ast: &'de Ast<'de>) -> Result<Eval<'de>> {
+        match ast {
+            Ast::Block(blk) => self.evaluate_block(blk),
+            _ => self.evaluate_statement(ast),
+        }
+    }
+
+    fn evaluate_statement_with_lookup(&mut self, ast: &'de Ast<'de>) -> Result<Eval<'de>> {
+        match self.evaluate_statement(ast)? {
+            Eval::Ident(i) => {
+                if let Some(var) = self.state.borrow().get(&i) {
+                    Ok(var)
+                } else {
+                    Err(anyhow::anyhow!(Eval::create_error(
+                        format!("undeclared variable: {i}"),
+                        70
+                    )))
+                }
+            }
+            other => Ok(other),
+        }
+    }
+
     fn evaluate_statement(&mut self, ast: &'de Ast<'de>) -> Result<Eval<'de>> {
         let outcome = match ast {
             Ast::Atom(atom) => self.evaluate_atom(atom),
             Ast::Cons(op, args) => self.evaluate_cons(*op, args)?,
-            Ast::Block(statements) => {
-                self.enter_scope();
-                let mut outputs = Vec::new();
-                for statement in statements {
-                    match self.evaluate_statement(statement)? {
-                        Eval::Block(blk) => outputs.extend_from_slice(&blk),
-                        other => outputs.push(other),
-                    }
-                }
-                self.exit_scope();
-                Eval::Block(outputs)
-            }
+            Ast::Block(statements) => self.evaluate_block(statements)?,
+            Ast::If { condition, yes, no } => self.evaluate_if(condition, yes, no)?,
             other => todo!("need to implement {other}"),
         };
 
@@ -78,24 +100,10 @@ impl<'de> Program<'de> {
 
             Op::Assign => {
                 let lhs = self.evaluate_statement(&args[0])?;
-                let rhs = self.evaluate_statement(&args[1])?;
+                let rhs = self.evaluate_statement_with_lookup(&args[1])?;
 
                 let Eval::Ident(var) = lhs else {
                     return Ok(Eval::create_error("can only assign to an identifier", 70));
-                };
-
-                let rhs = match rhs {
-                    Eval::Ident(i) => {
-                        if let Some(var) = self.state.borrow().get(i) {
-                            var
-                        } else {
-                            return Ok(Eval::create_error(
-                                format!("undeclared variable: {var}"),
-                                70,
-                            ));
-                        }
-                    }
-                    _ => rhs,
                 };
 
                 if self.state.borrow_mut().assign(&var, rhs.clone()) {
@@ -107,7 +115,7 @@ impl<'de> Program<'de> {
 
             Op::Var => {
                 let lhs = self.evaluate_statement(&args[0])?;
-                let rhs = self.evaluate_statement(&args[1])?;
+                let rhs = self.evaluate_statement_with_lookup(&args[1])?;
 
                 let Eval::Ident(var) = lhs else {
                     return Ok(Eval::Error((
@@ -116,34 +124,20 @@ impl<'de> Program<'de> {
                     )));
                 };
 
-                let rhs = match rhs {
-                    Eval::Ident(i) => {
-                        if let Some(var) = self.state.borrow().get(&i) {
-                            var
-                        } else {
-                            return Ok(Eval::create_error(
-                                format!("undeclared variable: {var}"),
-                                70,
-                            ));
-                        }
-                    }
-                    _ => rhs,
-                };
-
                 self.state.borrow_mut().define(var, rhs);
                 Eval::Nil
             }
 
             Op::Minus => {
                 if args.len() == 1 {
-                    let Eval::Number(n) = self.evaluate_statement(&args[0])? else {
+                    let Eval::Number(n) = self.evaluate_statement_with_lookup(&args[0])? else {
                         return Ok(Eval::Error((format!("Operator must be a number"), 70)));
                     };
 
                     return Ok(Eval::Number(-n));
                 } else {
-                    let lhs = self.evaluate_statement(&args[0])?;
-                    let rhs = self.evaluate_statement(&args[1])?;
+                    let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                    let rhs = self.evaluate_statement_with_lookup(&args[1])?;
                     if !self.check_numbers(&lhs, &rhs) {
                         return Ok(Eval::Error((
                             format!("operands must be numbers: {lhs} {rhs}"),
@@ -163,30 +157,8 @@ impl<'de> Program<'de> {
             }
 
             Op::Plus => {
-                let lhs = self.evaluate_statement(&args[0])?;
-                let rhs = self.evaluate_statement(&args[1])?;
-
-                let lhs = match lhs {
-                    Eval::Ident(i) => {
-                        if let Some(var) = self.state.borrow().get(&i) {
-                            var.clone()
-                        } else {
-                            return Ok(Eval::create_error(format!("undeclared variable: {i}"), 70));
-                        }
-                    }
-                    _ => lhs,
-                };
-
-                let rhs = match rhs {
-                    Eval::Ident(i) => {
-                        if let Some(var) = self.state.borrow().get(&i) {
-                            var.clone()
-                        } else {
-                            return Ok(Eval::create_error(format!("undeclared variable: {i}"), 70));
-                        }
-                    }
-                    _ => rhs,
-                };
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                let rhs = self.evaluate_statement_with_lookup(&args[1])?;
 
                 if self.check_numbers(&lhs, &rhs) {
                     let Eval::Number(left) = lhs else {
@@ -217,8 +189,8 @@ impl<'de> Program<'de> {
             }
 
             Op::GreaterEqual | Op::Greater | Op::Less | Op::LessEqual => {
-                let lhs = self.evaluate_statement(&args[0])?;
-                let rhs = self.evaluate_statement(&args[1])?;
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                let rhs = self.evaluate_statement_with_lookup(&args[1])?;
 
                 if !self.check_numbers(&lhs, &rhs) {
                     return Ok(Eval::Error((
@@ -245,8 +217,8 @@ impl<'de> Program<'de> {
             }
 
             Op::EqualEqual | Op::BangEqual => {
-                let lhs = self.evaluate_statement(&args[0])?;
-                let rhs = self.evaluate_statement(&args[1])?;
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                let rhs = self.evaluate_statement_with_lookup(&args[1])?;
 
                 if self.check_numbers(&lhs, &rhs) {
                     let Eval::Number(left) = lhs else {
@@ -295,7 +267,7 @@ impl<'de> Program<'de> {
                 }
             }
 
-            Op::Bang => match self.evaluate_statement(&args[0])? {
+            Op::Bang => match self.evaluate_statement_with_lookup(&args[0])? {
                 Eval::String(_) | Eval::Number(_) => Eval::Boolean(false),
                 Eval::Nil => Eval::Boolean(true),
                 Eval::Boolean(b) => Eval::Boolean(!b),
@@ -303,19 +275,8 @@ impl<'de> Program<'de> {
             },
             Op::Star | Op::Slash => {
                 assert!(args.len() > 1);
-                let lhs = self.evaluate_statement(&args[0])?;
-                let rhs = self.evaluate_statement(&args[1])?;
-
-                let lhs = match lhs {
-                    Eval::Ident(i) => {
-                        if let Some(var) = self.state.borrow().get(&i) {
-                            var
-                        } else {
-                            return Ok(Eval::create_error(format!("undeclared variable: {i}"), 70));
-                        }
-                    }
-                    _ => lhs,
-                };
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                let rhs = self.evaluate_statement_with_lookup(&args[1])?;
 
                 if !self.check_numbers(&lhs, &rhs) {
                     return Ok(Eval::Error((
@@ -359,6 +320,45 @@ impl<'de> Program<'de> {
         };
 
         Ok(result)
+    }
+
+    fn evaluate_block(&mut self, ast: &'de [Ast<'de>]) -> Result<Eval<'de>> {
+        self.enter_scope();
+        let mut outputs = Vec::new();
+        for statement in ast {
+            match self.evaluate_statement(statement)? {
+                Eval::Block(blk) => outputs.extend_from_slice(&blk),
+                other => outputs.push(other),
+            }
+        }
+        self.exit_scope();
+        Ok(Eval::Block(outputs))
+    }
+
+    fn evaluate_if(
+        &mut self,
+        condition: &'de Box<Ast<'de>>,
+        yes: &'de Box<Ast<'de>>,
+        no: &'de Option<Box<Ast<'de>>>,
+    ) -> Result<Eval<'de>> {
+        self.enter_scope();
+        let pass = match self.evaluate_statement_with_lookup(condition)? {
+            Eval::Boolean(b) => b,
+            other => anyhow::bail!("{other}"),
+        };
+
+        let resolution = if pass {
+            self.evaluate_block_or_statement(yes)?
+        } else {
+            match no {
+                Some(else_block) => self.evaluate_block_or_statement(else_block)?,
+                None => Eval::Nil,
+            }
+        };
+
+        self.exit_scope();
+
+        Ok(resolution)
     }
 
     fn enter_scope(&mut self) {
@@ -430,7 +430,7 @@ impl<'de> std::fmt::Display for Eval<'de> {
             Self::Error((msg, code)) => write!(f, "{msg}: {code}"),
             Self::Block(statements) => {
                 for statement in statements {
-                    write!(f, "{statement}")?;
+                    write!(f, "{statement} ")?;
                 }
                 Ok(())
             }

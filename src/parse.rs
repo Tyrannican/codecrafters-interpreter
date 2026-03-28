@@ -235,7 +235,7 @@ impl<'de> Parser<'de> {
                 ) {
                     self.parse_block()?
                 } else {
-                    self.parse_expression(0)?
+                    self.parse_statement()?
                 };
                 let mut other = None;
 
