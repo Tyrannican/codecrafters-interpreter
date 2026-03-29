@@ -247,7 +247,18 @@ impl<'de> Parser<'de> {
                     }))
                 ) {
                     self.lexer.next(); // consume `else`
-                    other = Some(self.parse_block()?);
+                    let block = if matches!(
+                        self.lexer.peek(),
+                        Some(Ok(Token {
+                            subtype: TokenType::LeftBrace,
+                            ..
+                        }))
+                    ) {
+                        self.parse_block()?
+                    } else {
+                        self.parse_statement()?
+                    };
+                    other = Some(block);
                 }
 
                 Ast::If {
