@@ -189,7 +189,17 @@ impl<'de> Parser<'de> {
                 self.lexer.expect(TokenType::LeftParen)?;
                 let condition = self.parse_expression(0)?;
                 self.lexer.expect(TokenType::RightParen)?;
-                let block = self.parse_block()?;
+                let block = if matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::LeftBrace,
+                        ..
+                    }))
+                ) {
+                    self.parse_block()?
+                } else {
+                    self.parse_statement()?
+                };
 
                 Ast::Cons(Op::While, vec![condition, block])
             }

@@ -348,6 +348,34 @@ impl<'de> Program<'de> {
                 }
             }
 
+            Op::While => {
+                self.enter_scope();
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                let mut cond = match lhs {
+                    Eval::Boolean(b) => b,
+                    Eval::Nil => false,
+                    _ => true,
+                };
+
+                let mut statements = Vec::new();
+                while cond {
+                    let rhs = self.evaluate_statement_with_lookup(&args[1])?;
+                    match rhs {
+                        Eval::Block(blk) => statements.extend_from_slice(&blk),
+                        other => statements.push(other),
+                    }
+                    let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                    cond = match lhs {
+                        Eval::Boolean(b) => b,
+                        Eval::Nil => false,
+                        _ => true,
+                    };
+                }
+                self.exit_scope();
+
+                Eval::Block(statements)
+            }
+
             _ => todo!("implement operation: {op}"),
         };
 
@@ -358,7 +386,7 @@ impl<'de> Program<'de> {
         self.enter_scope();
         let mut outputs = Vec::new();
         for statement in ast {
-            match self.evaluate_statement(statement)? {
+            match self.evaluate_statement_with_lookup(statement)? {
                 Eval::Block(blk) => outputs.extend_from_slice(&blk),
                 other => outputs.push(other),
             }
