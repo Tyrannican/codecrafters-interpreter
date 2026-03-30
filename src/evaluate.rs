@@ -376,6 +376,36 @@ impl<'de> Program<'de> {
                 Eval::Block(statements)
             }
 
+            Op::For => {
+                self.enter_scope();
+                self.evaluate_statement_with_lookup(&args[0])?;
+                let cond = self.evaluate_statement_with_lookup(&args[1])?;
+                let mut cond = match cond {
+                    Eval::Boolean(b) => b,
+                    Eval::Nil => false,
+                    _ => true,
+                };
+
+                let mut statements = Vec::new();
+                while cond {
+                    match self.evaluate_statement_with_lookup(&args[3])? {
+                        Eval::Block(blk) => statements.extend_from_slice(&blk),
+                        other => statements.push(other),
+                    }
+
+                    self.evaluate_statement_with_lookup(&args[2])?;
+                    let check = self.evaluate_statement_with_lookup(&args[1])?;
+                    cond = match check {
+                        Eval::Boolean(b) => b,
+                        Eval::Nil => false,
+                        _ => true,
+                    };
+                }
+                self.exit_scope();
+
+                Eval::Block(statements)
+            }
+
             _ => todo!("implement operation: {op}"),
         };
 
