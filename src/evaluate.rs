@@ -333,6 +333,21 @@ impl<'de> Program<'de> {
                 }
             }
 
+            Op::And => {
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+                let left = match lhs {
+                    Eval::Boolean(b) => b,
+                    Eval::Nil => false,
+                    _ => true,
+                };
+
+                if !left {
+                    lhs
+                } else {
+                    self.evaluate_statement_with_lookup(&args[1])?
+                }
+            }
+
             _ => todo!("implement operation: {op}"),
         };
 
