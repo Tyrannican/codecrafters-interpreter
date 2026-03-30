@@ -173,13 +173,66 @@ impl<'de> Parser<'de> {
             TokenType::For => {
                 self.lexer.next(); // consume `for`
                 self.lexer.expect(TokenType::LeftParen)?;
-                let initialiser = self.parse_expression(0)?;
-                self.lexer.expect(TokenType::Semicolon)?;
-                let condition = self.parse_expression(0)?;
-                self.lexer.expect(TokenType::Semicolon)?;
-                let increment = self.parse_expression(0)?;
-                self.lexer.expect(TokenType::RightParen)?;
-                let block = self.parse_block()?;
+
+                // Initialiser: either `;` (empty) or a full statement (which
+                // consumes its own trailing `;`).
+                let initialiser = if matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::Semicolon,
+                        ..
+                    }))
+                ) {
+                    self.lexer.next(); // consume bare `;`
+                    Ast::Atom(Atom::Nil)
+                } else {
+                    self.parse_statement()?
+                };
+
+                // Condition: either `;` (empty → always true) or an expression
+                // followed by `;`.
+                let condition = if matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::Semicolon,
+                        ..
+                    }))
+                ) {
+                    self.lexer.next(); // consume bare `;`
+                    Ast::Atom(Atom::Bool(true))
+                } else {
+                    let expr = self.parse_expression(0)?;
+                    self.consume_optional_semicolon();
+                    expr
+                };
+
+                // Increment: either `)` (empty) or an expression followed by `)`.
+                let increment = if matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::RightParen,
+                        ..
+                    }))
+                ) {
+                    self.lexer.next(); // consume `)`
+                    Ast::Atom(Atom::Nil)
+                } else {
+                    let expr = self.parse_expression(0)?;
+                    self.lexer.expect(TokenType::RightParen)?;
+                    expr
+                };
+
+                let block = if matches!(
+                    self.lexer.peek(),
+                    Some(Ok(Token {
+                        subtype: TokenType::LeftBrace,
+                        ..
+                    }))
+                ) {
+                    self.parse_block()?
+                } else {
+                    self.parse_statement()?
+                };
 
                 Ast::Cons(Op::For, vec![initialiser, condition, increment, block])
             }

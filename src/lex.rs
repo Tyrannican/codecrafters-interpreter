@@ -61,7 +61,12 @@ impl<'de> Lexer<'de> {
         let token = match self.next() {
             Some(Ok(token)) => {
                 if token.subtype != token_type {
-                    anyhow::bail!("expected {:?} found {:?}", token_type, token.subtype);
+                    anyhow::bail!(
+                        "expected {:?} found {:?} ({:?})",
+                        token_type,
+                        token.subtype,
+                        token
+                    );
                 }
                 token
             }
