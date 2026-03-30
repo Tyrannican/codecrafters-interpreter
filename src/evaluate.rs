@@ -316,6 +316,23 @@ impl<'de> Program<'de> {
                     }
                 }
             }
+
+            Op::Or => {
+                let lhs = self.evaluate_statement_with_lookup(&args[0])?;
+
+                let left = match lhs {
+                    Eval::Boolean(b) => b,
+                    Eval::Nil => false,
+                    _ => true,
+                };
+
+                if left {
+                    lhs
+                } else {
+                    self.evaluate_statement_with_lookup(&args[1])?
+                }
+            }
+
             _ => todo!("implement operation: {op}"),
         };
 
@@ -344,7 +361,8 @@ impl<'de> Program<'de> {
         self.enter_scope();
         let pass = match self.evaluate_statement_with_lookup(condition)? {
             Eval::Boolean(b) => b,
-            other => anyhow::bail!("{other}"),
+            Eval::Nil => false,
+            _ => true,
         };
 
         let resolution = if pass {
