@@ -199,7 +199,7 @@ impl<'de> Parser<'de> {
                     }))
                 ) {
                     self.lexer.next(); // consume bare `;`
-                    Ast::Atom(Atom::Bool(true))
+                    Ast::Atom(Atom::Nil)
                 } else {
                     let expr = self.parse_expression(0)?;
                     self.consume_optional_semicolon();
@@ -222,16 +222,16 @@ impl<'de> Parser<'de> {
                     expr
                 };
 
-                let block = if matches!(
-                    self.lexer.peek(),
+                let block = match self.lexer.peek() {
                     Some(Ok(Token {
                         subtype: TokenType::LeftBrace,
                         ..
-                    }))
-                ) {
-                    self.parse_block()?
-                } else {
-                    self.parse_statement()?
+                    })) => self.parse_block()?,
+                    Some(Ok(Token {
+                        subtype: TokenType::Print,
+                        ..
+                    })) => self.parse_statement()?,
+                    _ => self.parse_expression(0)?,
                 };
 
                 Ast::Cons(Op::For, vec![initialiser, condition, increment, block])
