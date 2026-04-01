@@ -74,7 +74,13 @@ impl<'de> Program<'de> {
             Ast::Cons(op, args) => self.evaluate_cons(*op, args)?,
             Ast::Block(statements) => self.evaluate_block(statements)?,
             Ast::If { condition, yes, no } => self.evaluate_if(condition, yes, no)?,
-            other => todo!("need to implement {other}"),
+            Ast::Call { caller, arguments } => self.evaluate_call(caller, arguments)?,
+            Ast::Function {
+                name,
+                parameters,
+                block,
+            } => self.evaluate_function(*name, parameters, block)?,
+            other => todo!("need to implement {other:?}"),
         };
 
         Ok(outcome)
@@ -452,6 +458,41 @@ impl<'de> Program<'de> {
         Ok(resolution)
     }
 
+    fn evaluate_function(
+        &mut self,
+        name: Atom<'de>,
+        args: &'de [Ast<'de>],
+        block: &'de Box<Ast<'de>>,
+    ) -> Result<Eval<'de>> {
+        let Atom::Ident(func_name) = name else {
+            anyhow::bail!("can only call functions or classes");
+        };
+
+        // TODO: Map AST args to Eval Idents
+        let args = vec![];
+        let f = Eval::Function { args, block };
+        self.state.borrow_mut().define(&func_name, f);
+        Ok(Eval::Nil)
+    }
+
+    fn evaluate_call(
+        &mut self,
+        caller: &'de Box<Ast<'de>>,
+        call_args: &'de [Ast<'de>],
+    ) -> Result<Eval<'de>> {
+        self.enter_scope();
+        let Eval::Function { args, block } = self.evaluate_statement_with_lookup(caller)? else {
+            anyhow::bail!("can only call functions or classes");
+        };
+
+        assert!(args.len() == call_args.len());
+
+        let thing = self.evaluate_block_or_statement(block)?;
+        eprintln!("THING: {thing:?}");
+        self.exit_scope();
+        todo!()
+    }
+
     fn enter_scope(&mut self) {
         let child = Scope {
             assignments: HashMap::new(),
@@ -495,6 +536,10 @@ pub enum Eval<'de> {
     Print(Box<Eval<'de>>),
     Error((String, i32)),
     Block(Vec<Eval<'de>>),
+    Function {
+        args: Vec<Eval<'de>>,
+        block: &'de Box<Ast<'de>>,
+    },
     Nil,
 }
 
@@ -525,6 +570,7 @@ impl<'de> std::fmt::Display for Eval<'de> {
                 }
                 Ok(())
             }
+            Self::Function { args, block: _ } => write!(f, "function ({args:?}) {{...}}"),
         }
     }
 }

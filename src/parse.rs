@@ -55,6 +55,8 @@ impl<'de> Parser<'de> {
                     _ => anyhow::bail!("syntax error in function declaration"),
                 }
             }
+        } else {
+            self.lexer.next();
         }
 
         let block = self.parse_block()?;
@@ -80,7 +82,7 @@ impl<'de> Parser<'de> {
                 ..
             }))
         ) {
-            // No arguments — the `)` will be consumed by the caller.
+            self.lexer.next();
         } else {
             loop {
                 let arg = self.parse_expression(0)?;
@@ -473,6 +475,7 @@ fn postfix_binding_power(op: Op) -> Option<(u8, ())> {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub enum Ast<'de> {
     Atom(Atom<'de>),
     Cons(Op, Vec<Ast<'de>>),

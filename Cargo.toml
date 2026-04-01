@@ -9,4 +9,5 @@ rust-version = "1.91"
 anyhow = "1.0.68"                                # error handling
 bytes = "1.3.0"                                  # helps manage buffers
 clap = { version = "4.6.0", features = ["derive"] }
+jiff = "0.2.23"
 thiserror = "1.0.38"                             # error handling
