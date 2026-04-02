@@ -412,6 +412,8 @@ impl<'de> Program<'de> {
                 Eval::Block(statements)
             }
 
+            Op::Return => self.evaluate_statement_with_lookup(&args[0])?,
+
             _ => todo!("implement operation: {op}"),
         };
 
@@ -461,15 +463,22 @@ impl<'de> Program<'de> {
     fn evaluate_function(
         &mut self,
         name: Atom<'de>,
-        args: &'de [Ast<'de>],
+        func_args: &'de [Ast<'de>],
         block: &'de Box<Ast<'de>>,
     ) -> Result<Eval<'de>> {
         let Atom::Ident(func_name) = name else {
             anyhow::bail!("can only call functions or classes");
         };
 
-        // TODO: Map AST args to Eval Idents
-        let args = vec![];
+        let mut args = vec![];
+        for arg in func_args.into_iter() {
+            let Ast::Atom(Atom::Ident(ident)) = arg else {
+                anyhow::bail!("expected identifier");
+            };
+
+            args.push(Eval::Ident(Cow::Borrowed(*ident)));
+        }
+
         let f = Eval::Function { args, block };
         self.state.borrow_mut().define(&func_name, f);
         Ok(Eval::Nil)
@@ -487,10 +496,25 @@ impl<'de> Program<'de> {
 
         assert!(args.len() == call_args.len());
 
-        let thing = self.evaluate_block_or_statement(block)?;
-        eprintln!("THING: {thing:?}");
+        let call_args: Vec<Eval<'de>> = call_args
+            .into_iter()
+            .map(|a| {
+                self.evaluate_statement_with_lookup(a)
+                    .expect("these should be values or idents")
+            })
+            .collect();
+
+        for (ident, value) in args.into_iter().zip(call_args.into_iter()) {
+            let Eval::Ident(ident) = ident else {
+                anyhow::bail!("expected identifier");
+            };
+            self.state.borrow_mut().define(ident, value);
+        }
+
+        let value = self.evaluate_block_or_statement(block)?;
         self.exit_scope();
-        todo!()
+
+        Ok(value)
     }
 
     fn enter_scope(&mut self) {
@@ -575,6 +599,7 @@ impl<'de> std::fmt::Display for Eval<'de> {
     }
 }
 
+#[derive(Debug)]
 pub struct Scope<'de> {
     assignments: HashMap<Cow<'de, str>, Eval<'de>>,
     parent: Option<Rc<RefCell<Scope<'de>>>>,
