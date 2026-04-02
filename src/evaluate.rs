@@ -64,19 +64,23 @@ impl<'de> Program<'de> {
                     )))
                 }
             }
-            Eval::Return(ret) => match *ret {
-                Eval::Ident(i) => {
-                    if let Some(var) = self.state.borrow().get(&i) {
-                        Ok(var)
-                    } else {
-                        Err(anyhow::anyhow!(Eval::create_error(
-                            format!("undeclared variable: {i}"),
-                            70
-                        )))
+            Eval::Return(ret) => {
+                let resolved_value = match *ret {
+                    Eval::Ident(i) => {
+                        if let Some(var) = self.state.borrow().get(&i) {
+                            var
+                        } else {
+                            return Err(anyhow::anyhow!(Eval::create_error(
+                                format!("undeclared variable: {i}"),
+                                70
+                            )));
+                        }
                     }
-                }
-                other => Ok(other),
-            },
+                    other => other,
+                };
+
+                Ok(Eval::Return(Box::new(resolved_value)))
+            }
             other => Ok(other),
         }
     }
@@ -440,13 +444,15 @@ impl<'de> Program<'de> {
             match self.evaluate_statement_with_lookup(statement)? {
                 Eval::Block(blk) => outputs.extend_from_slice(&blk),
                 Eval::Return(ret) => {
-                    outputs.push(*ret);
-                    return Ok(Eval::Block(outputs));
+                    self.exit_scope();
+                    return Ok(Eval::Return(ret));
                 }
                 other => outputs.push(other),
             }
         }
         self.exit_scope();
+
+        // TODO: Deal with an empty block
         Ok(Eval::Block(outputs))
     }
 
@@ -515,37 +521,54 @@ impl<'de> Program<'de> {
             ret => return Ok(ret),
         }
 
-        let Eval::Function {
-            func_name: _,
-            args,
-            block,
-        } = self.evaluate_statement_with_lookup(caller)?
-        else {
-            anyhow::bail!("can only call functions or classes");
-        };
-
-        assert!(args.len() == call_args.len());
-
         let call_args: Vec<Eval<'de>> = call_args
             .into_iter()
             .map(|a| {
                 self.evaluate_statement_with_lookup(a)
-                    .expect("these should be values or idents")
+                    .expect("values or idents")
             })
             .collect();
 
-        for (ident, value) in args.into_iter().zip(call_args.into_iter()) {
+        match self.evaluate_statement_with_lookup(caller)? {
+            Eval::Function {
+                func_name: _,
+                args,
+                block,
+            } => Ok(self.evaluate_function_call(args, call_args, block)?),
+            nyi => unimplemented!("not yet - {nyi}"),
+        }
+    }
+
+    fn evaluate_function_call(
+        &mut self,
+        args_ph: Vec<Eval<'de>>,
+        call_args: Vec<Eval<'de>>,
+        block: &'de Box<Ast<'de>>,
+    ) -> Result<Eval<'de>> {
+        assert!(args_ph.len() == call_args.len());
+
+        self.enter_scope();
+        for (ident, value) in args_ph.iter().zip(call_args.into_iter()) {
             let Eval::Ident(ident) = ident else {
                 anyhow::bail!("expected identifier");
             };
             self.state.borrow_mut().define(ident, value);
         }
 
-        let value = self.evaluate_block_or_statement(block)?;
+        let result = self.evaluate_block_or_statement(block)?;
 
-        Ok(value)
+        self.exit_scope();
+        match result {
+            Eval::Return(ret) => Ok(*ret),
+            other => Ok(other),
+        }
     }
 
+    fn evaluate_class_call(&mut self) -> Result<Eval<'de>> {
+        todo!("implement class calls")
+    }
+
+    // There's only one - refactor if more
     fn native_function(&mut self, caller: &'de Box<Ast<'de>>) -> Result<Eval<'de>> {
         let Eval::Ident(ident) = self.evaluate_statement(caller)? else {
             todo!()
