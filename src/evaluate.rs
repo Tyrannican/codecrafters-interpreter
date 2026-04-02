@@ -48,7 +48,7 @@ impl<'de> Program<'de> {
     fn evaluate_block_or_statement(&mut self, ast: &'de Ast<'de>) -> Result<Eval<'de>> {
         match ast {
             Ast::Block(blk) => self.evaluate_block(blk),
-            _ => self.evaluate_statement(ast),
+            _ => self.evaluate_statement_with_lookup(ast),
         }
     }
 
@@ -64,6 +64,19 @@ impl<'de> Program<'de> {
                     )))
                 }
             }
+            Eval::Return(ret) => match *ret {
+                Eval::Ident(i) => {
+                    if let Some(var) = self.state.borrow().get(&i) {
+                        Ok(var)
+                    } else {
+                        Err(anyhow::anyhow!(Eval::create_error(
+                            format!("undeclared variable: {i}"),
+                            70
+                        )))
+                    }
+                }
+                other => Ok(other),
+            },
             other => Ok(other),
         }
     }
@@ -412,7 +425,7 @@ impl<'de> Program<'de> {
                 Eval::Block(statements)
             }
 
-            Op::Return => self.evaluate_statement_with_lookup(&args[0])?,
+            Op::Return => Eval::Return(Box::new(self.evaluate_statement_with_lookup(&args[0])?)),
 
             _ => todo!("implement operation: {op}"),
         };
@@ -426,6 +439,10 @@ impl<'de> Program<'de> {
         for statement in ast {
             match self.evaluate_statement_with_lookup(statement)? {
                 Eval::Block(blk) => outputs.extend_from_slice(&blk),
+                Eval::Return(ret) => {
+                    outputs.push(*ret);
+                    return Ok(Eval::Block(outputs));
+                }
                 other => outputs.push(other),
             }
         }
@@ -489,7 +506,11 @@ impl<'de> Program<'de> {
         caller: &'de Box<Ast<'de>>,
         call_args: &'de [Ast<'de>],
     ) -> Result<Eval<'de>> {
-        self.enter_scope();
+        match self.native_function(caller)? {
+            Eval::Nil => {}
+            ret => return Ok(ret),
+        }
+
         let Eval::Function { args, block } = self.evaluate_statement_with_lookup(caller)? else {
             anyhow::bail!("can only call functions or classes");
         };
@@ -512,9 +533,19 @@ impl<'de> Program<'de> {
         }
 
         let value = self.evaluate_block_or_statement(block)?;
-        self.exit_scope();
 
         Ok(value)
+    }
+
+    fn native_function(&mut self, caller: &'de Box<Ast<'de>>) -> Result<Eval<'de>> {
+        let Eval::Ident(ident) = self.evaluate_statement(caller)? else {
+            todo!()
+        };
+
+        match ident.as_ref() {
+            "clock" => return Ok(Eval::Number(jiff::Timestamp::now().as_second() as f64)),
+            _ => Ok(Eval::Nil),
+        }
     }
 
     fn enter_scope(&mut self) {
@@ -558,6 +589,7 @@ pub enum Eval<'de> {
     Boolean(bool),
     Ident(Cow<'de, str>),
     Print(Box<Eval<'de>>),
+    Return(Box<Eval<'de>>),
     Error((String, i32)),
     Block(Vec<Eval<'de>>),
     Function {
@@ -587,6 +619,7 @@ impl<'de> std::fmt::Display for Eval<'de> {
             Self::Boolean(b) => write!(f, "{b:?}"),
             Self::Nil => write!(f, "nil"),
             Self::Print(statement) => write!(f, "{statement}"),
+            Self::Return(ret) => write!(f, "return {ret}"),
             Self::Error((msg, code)) => write!(f, "{msg}: {code}"),
             Self::Block(statements) => {
                 for statement in statements {
