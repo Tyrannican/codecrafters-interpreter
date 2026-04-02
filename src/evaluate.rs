@@ -496,7 +496,11 @@ impl<'de> Program<'de> {
             args.push(Eval::Ident(Cow::Borrowed(*ident)));
         }
 
-        let f = Eval::Function { args, block };
+        let f = Eval::Function {
+            func_name: Cow::Borrowed(func_name),
+            args,
+            block,
+        };
         self.state.borrow_mut().define(&func_name, f);
         Ok(Eval::Nil)
     }
@@ -511,7 +515,12 @@ impl<'de> Program<'de> {
             ret => return Ok(ret),
         }
 
-        let Eval::Function { args, block } = self.evaluate_statement_with_lookup(caller)? else {
+        let Eval::Function {
+            func_name: _,
+            args,
+            block,
+        } = self.evaluate_statement_with_lookup(caller)?
+        else {
             anyhow::bail!("can only call functions or classes");
         };
 
@@ -593,6 +602,7 @@ pub enum Eval<'de> {
     Error((String, i32)),
     Block(Vec<Eval<'de>>),
     Function {
+        func_name: Cow<'de, str>,
         args: Vec<Eval<'de>>,
         block: &'de Box<Ast<'de>>,
     },
@@ -627,7 +637,11 @@ impl<'de> std::fmt::Display for Eval<'de> {
                 }
                 Ok(())
             }
-            Self::Function { args, block: _ } => write!(f, "function ({args:?}) {{...}}"),
+            Self::Function {
+                func_name,
+                args: _,
+                block: _,
+            } => write!(f, "<fn {func_name}>"),
         }
     }
 }
