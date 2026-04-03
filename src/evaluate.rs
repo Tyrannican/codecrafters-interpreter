@@ -453,7 +453,11 @@ impl<'de> Program<'de> {
         self.exit_scope();
 
         // TODO: Deal with an empty block
-        Ok(Eval::Block(outputs))
+        if outputs.is_empty() {
+            Ok(Eval::Block(vec![Eval::Nil]))
+        } else {
+            Ok(Eval::Block(outputs))
+        }
     }
 
     fn evaluate_if(
@@ -656,7 +660,7 @@ impl<'de> std::fmt::Display for Eval<'de> {
             Self::Error((msg, code)) => write!(f, "{msg}: {code}"),
             Self::Block(statements) => {
                 for statement in statements {
-                    write!(f, "{statement} ")?;
+                    write!(f, "{statement}")?;
                 }
                 Ok(())
             }
