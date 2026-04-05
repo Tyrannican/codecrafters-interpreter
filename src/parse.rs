@@ -155,19 +155,24 @@ impl<'de> Parser<'de> {
         let ast = match peeked {
             // Block statement: { ... }
             TokenType::LeftBrace => self.parse_block()?,
-
-            // Print / return are prefix-style keyword statements whose
-            // argument is a single expression.
-            TokenType::Print | TokenType::Return => {
-                let keyword = self.lexer.next().expect("peeked Some").expect("peeked Ok");
-                let op = match keyword.subtype {
-                    TokenType::Print => Op::Print,
-                    TokenType::Return => Op::Return,
-                    _ => unreachable!("by the match pattern above"),
-                };
-
+            TokenType::Print => {
+                self.lexer.next();
+                let op = Op::Print;
                 let ((), r_bp) = prefix_binding_power(op);
                 let rhs = self.parse_expression(r_bp)?;
+                self.consume_optional_semicolon();
+                Ast::Cons(op, vec![rhs])
+            }
+
+            TokenType::Return => {
+                self.lexer.next();
+                let op = Op::Return;
+                let ((), r_bp) = prefix_binding_power(op);
+                let rhs = match self.parse_expression(r_bp) {
+                    Ok(rhs) => rhs,
+                    Err(_) => Ast::Atom(Atom::Nil),
+                };
+
                 self.consume_optional_semicolon();
                 Ast::Cons(op, vec![rhs])
             }

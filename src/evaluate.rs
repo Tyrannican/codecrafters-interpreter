@@ -324,19 +324,15 @@ impl<'de> Program<'de> {
 
             Op::Print => {
                 let lhs = self.evaluate_statement(&args[0])?;
-                if lhs == Eval::Nil {
-                    Eval::Error(("invalid print expression".to_string(), 70))
-                } else {
-                    match lhs {
-                        Eval::Ident(var) => {
-                            if let Some(assignment) = self.state.borrow().get(&var) {
-                                Eval::Print(Box::new(assignment.clone()))
-                            } else {
-                                Eval::Error((format!("undefined variable: {var}"), 70))
-                            }
+                match lhs {
+                    Eval::Ident(var) => {
+                        if let Some(assignment) = self.state.borrow().get(&var) {
+                            Eval::Print(Box::new(assignment.clone()))
+                        } else {
+                            Eval::Error((format!("undefined variable: {var}"), 70))
                         }
-                        _ => Eval::Print(Box::new(lhs)),
                     }
+                    _ => Eval::Print(Box::new(lhs)),
                 }
             }
 
@@ -452,7 +448,6 @@ impl<'de> Program<'de> {
         }
         self.exit_scope();
 
-        // TODO: Deal with an empty block
         if outputs.is_empty() {
             Ok(Eval::Block(vec![Eval::Nil]))
         } else {
