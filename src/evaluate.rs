@@ -563,6 +563,7 @@ impl<'de> Program<'de> {
         }
     }
 
+    #[allow(dead_code)]
     fn evaluate_class_call(&mut self) -> Result<Eval<'de>> {
         todo!("implement class calls")
     }
@@ -570,7 +571,7 @@ impl<'de> Program<'de> {
     // There's only one - refactor if more
     fn native_function(&mut self, caller: &'de Box<Ast<'de>>) -> Result<Eval<'de>> {
         let Eval::Ident(ident) = self.evaluate_statement(caller)? else {
-            todo!()
+            return Ok(Eval::Nil);
         };
 
         match ident.as_ref() {
