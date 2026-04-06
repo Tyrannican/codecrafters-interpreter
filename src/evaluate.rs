@@ -381,6 +381,10 @@ impl<'de> Program<'de> {
                     let rhs = self.evaluate_statement_with_lookup(&args[1])?;
                     match rhs {
                         Eval::Block(blk) => statements.extend_from_slice(&blk),
+                        Eval::Return(ret) => {
+                            self.exit_scope();
+                            return Ok(Eval::Return(Box::new(*ret)));
+                        }
                         other => statements.push(other),
                     }
                     let lhs = self.evaluate_statement_with_lookup(&args[0])?;
@@ -534,7 +538,12 @@ impl<'de> Program<'de> {
                 args,
                 block,
             } => Ok(self.evaluate_function_call(args, call_args, block)?),
-            nyi => unimplemented!("not yet - {nyi}"),
+            _ => {
+                return Err(anyhow::anyhow!(Eval::create_error(
+                    "can only call functions or classes",
+                    70
+                )));
+            }
         }
     }
 
@@ -544,7 +553,13 @@ impl<'de> Program<'de> {
         call_args: Vec<Eval<'de>>,
         block: &'de Box<Ast<'de>>,
     ) -> Result<Eval<'de>> {
-        assert!(args_ph.len() == call_args.len());
+        // assert!(args_ph.len() == call_args.len());
+        if args_ph.len() != call_args.len() {
+            return Err(anyhow::anyhow!(Eval::create_error(
+                "required arguments do not match",
+                70
+            )));
+        }
 
         self.enter_scope();
         for (ident, value) in args_ph.iter().zip(call_args.into_iter()) {
